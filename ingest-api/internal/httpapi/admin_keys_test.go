@@ -64,7 +64,7 @@ func serveAdmin(store *fakeKeyStore, refresher *fakeRefresher, method string, pa
 		request.Header.Set("Authorization", authorization)
 	}
 	recorder := httptest.NewRecorder()
-	NewHandler(context.Background(), logger, &fakePinger{}, store, refresher, &fakeRecordWriter{}, &fakeStorageReporter{}, &fakeDiskGuard{}, config.Config{AdminToken: "admin-token"}).ServeHTTP(recorder, request)
+	NewHandler(context.Background(), logger, &fakePinger{}, store, refresher, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, config.Config{AdminToken: "admin-token"}).ServeHTTP(recorder, request)
 	return recorder
 }
 

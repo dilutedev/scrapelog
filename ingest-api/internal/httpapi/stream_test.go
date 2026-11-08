@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dilutedev/scrapelog/ingest-api/internal/bodies"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ingest"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ratelimit"
@@ -78,9 +79,16 @@ func streamConfig(maxBatchRecords int) config.Config {
 }
 
 func newStreamHandler(writer RecordWriter, guard DiskGuard, loadedConfig config.Config, shutdownContext context.Context, flushInterval time.Duration) http.Handler {
+	return newStreamHandlerWithBodyStore(writer, &fakeBodyStore{}, guard, loadedConfig, shutdownContext, flushInterval)
+}
+
+func newStreamHandlerWithBodyStore(writer RecordWriter, bodyStore BodyStore, guard DiskGuard, loadedConfig config.Config, shutdownContext context.Context, flushInterval time.Duration) http.Handler {
+	if loadedConfig.MaxBodyBytes == 0 {
+		loadedConfig.MaxBodyBytes = 1024
+	}
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	recordLimiter := ratelimit.New(loadedConfig.RateLimitRecordsPerMinute, time.Now)
-	return requireAPIKey(&fakeRefresher{}, streamRequestsHandler(logger, writer, recordLimiter, guard, shutdownContext, loadedConfig, flushInterval))
+	return requireAPIKey(&fakeRefresher{}, streamRequestsHandler(logger, writer, bodyStore, recordLimiter, guard, shutdownContext, loadedConfig, flushInterval))
 }
 
 func serveStream(handler http.Handler, body io.Reader, contentEncoding string) *httptest.ResponseRecorder {
@@ -158,7 +166,7 @@ func TestStreamAcceptsTenThousandLinesInChunksOfTwoThousand(t *testing.T) {
 	if response.Accepted != 10000 || response.Rejected != 0 || len(response.Errors) != 0 {
 		t.Fatalf("response %+v", response)
 	}
-	if recorder.Body.String() != "{\"accepted\":10000,\"rejected\":0,\"errors\":[]}\n" {
+	if recorder.Body.String() != "{\"accepted\":10000,\"rejected\":0,\"errors\":[],\"warnings\":[]}\n" {
 		t.Fatalf("body %q", recorder.Body.String())
 	}
 	requireChunkSizes(t, writer, 2000, 2000, 2000, 2000, 2000)
@@ -199,6 +207,72 @@ func TestStreamStoresRequestBodyAndRejectsOverCapRecord(t *testing.T) {
 	}
 	if len(writer.chunks) != 1 || writer.chunks[0][0].RequestBody != "aGk=" || writer.chunks[0][0].RequestBodyEncoding != "base64" {
 		t.Fatalf("chunks %+v", writer.chunks)
+	}
+}
+
+func streamBodyLines(count int) string {
+	var lines strings.Builder
+	for index := 0; index < count; index++ {
+		fmt.Fprintf(&lines, "{\"url\":\"https://example.com/%d\",\"method\":\"GET\",\"request_id\":\"req-%d\",\"body\":\"hi\"}\n", index, index)
+	}
+	return lines.String()
+}
+
+func TestStreamUploadsBodiesBeforeInsertAndAccumulatesWarningsAcrossFlushes(t *testing.T) {
+	writer := newChunkRecordingWriter()
+	bodyStore := &fakeBodyStore{warningsForCall: warnForFirstRecord}
+	handler := newStreamHandlerWithBodyStore(writer, bodyStore, &fakeDiskGuard{}, streamConfig(2), context.Background(), time.Hour)
+
+	recorder := serveStream(handler, strings.NewReader(streamBodyLines(4)), "")
+
+	response := requireStatus(t, recorder, http.StatusOK)
+	wantWarnings := []bodies.Warning{{Index: 0, Warning: "call 1"}, {Index: 2, Warning: "call 2"}}
+	if fmt.Sprint(response.Warnings) != fmt.Sprint(wantWarnings) || response.Accepted != 4 {
+		t.Fatalf("response %+v", response)
+	}
+	for _, chunk := range writer.chunks {
+		for _, record := range chunk {
+			if record.BodyKey != "stored/"+record.RequestID {
+				t.Fatalf("record inserted without body key: %+v", record)
+			}
+		}
+	}
+}
+
+func TestStreamFailedInsertDoesNotCommitThatFlushWarnings(t *testing.T) {
+	writer := newChunkRecordingWriter()
+	writer.failOnCall = 2
+	bodyStore := &fakeBodyStore{warningsForCall: warnForFirstRecord}
+	handler := newStreamHandlerWithBodyStore(writer, bodyStore, &fakeDiskGuard{}, streamConfig(2), context.Background(), time.Hour)
+
+	recorder := serveStream(handler, strings.NewReader(streamBodyLines(4)), "")
+
+	response := requireStatus(t, recorder, http.StatusServiceUnavailable)
+	wantWarnings := []bodies.Warning{{Index: 0, Warning: "call 1"}}
+	if fmt.Sprint(response.Warnings) != fmt.Sprint(wantWarnings) || response.Accepted != 2 {
+		t.Fatalf("response %+v", response)
+	}
+}
+
+func TestStreamWithoutS3WarnsAtLineIndex(t *testing.T) {
+	writer := newChunkRecordingWriter()
+	bodyStore := bodies.NewStore(nil, "bodies/", slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	handler := newStreamHandlerWithBodyStore(writer, bodyStore, &fakeDiskGuard{}, streamConfig(100), context.Background(), time.Hour)
+	body := `{"method":"GET"}` + "\n" + `{"url":"https://a.com","method":"GET","body":"hi"}` + "\n"
+
+	recorder := serveStream(handler, strings.NewReader(body), "")
+
+	response := requireStatus(t, recorder, http.StatusOK)
+	if len(response.Warnings) != 1 || response.Warnings[0] != (bodies.Warning{Index: 1, Warning: "body dropped: S3 is not configured"}) {
+		t.Fatalf("warnings %+v", response.Warnings)
+	}
+}
+
+func TestStreamResponseAlwaysContainsEmptyWarningsList(t *testing.T) {
+	recorder := serveStreamSimple(newChunkRecordingWriter(), streamConfig(100), ndjsonLines(1))
+
+	if !strings.Contains(recorder.Body.String(), `"warnings":[]`) {
+		t.Fatalf("body %s", recorder.Body.String())
 	}
 }
 
@@ -463,7 +537,7 @@ func TestStreamGuardsRunBeforeReadingBody(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	unauthenticated := httptest.NewRequest(http.MethodPost, "/v1/requests/stream", failingReader{t})
 	unauthenticatedRecorder := httptest.NewRecorder()
-	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, newChunkRecordingWriter(), &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(unauthenticatedRecorder, unauthenticated)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, newChunkRecordingWriter(), &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(unauthenticatedRecorder, unauthenticated)
 	if unauthenticatedRecorder.Code != http.StatusUnauthorized {
 		t.Fatalf("status %d, want 401", unauthenticatedRecorder.Code)
 	}

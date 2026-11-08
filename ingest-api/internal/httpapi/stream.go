@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dilutedev/scrapelog/ingest-api/internal/apikeys"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/bodies"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ingest"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ratelimit"
@@ -66,7 +67,7 @@ func readStreamLines(contentEncoding string, body io.Reader, loadedConfig config
 	return scanner.Err()
 }
 
-func streamRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, recordLimiter *ratelimit.Limiter, diskGuard DiskGuard, shutdownContext context.Context, loadedConfig config.Config, flushInterval time.Duration) func(http.ResponseWriter, *http.Request, apikeys.Identity) {
+func streamRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, bodyStore BodyStore, recordLimiter *ratelimit.Limiter, diskGuard DiskGuard, shutdownContext context.Context, loadedConfig config.Config, flushInterval time.Duration) func(http.ResponseWriter, *http.Request, apikeys.Identity) {
 	flushRecordLimit := min(streamFlushRecordLimit, loadedConfig.MaxBatchRecords)
 	flushByteLimit := int(decodedBodyMultiplier * loadedConfig.MaxRequestBytes)
 	return func(responseWriter http.ResponseWriter, request *http.Request, identity apikeys.Identity) {
@@ -79,7 +80,7 @@ func streamRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, recor
 			return
 		}
 
-		committed := ingestSummary{Errors: []recordError{}}
+		committed := ingestSummary{Errors: []recordError{}, Warnings: []bodies.Warning{}}
 		var pendingRecords []ingest.Record
 		var pendingErrors []recordError
 		pendingLineCount := 0
@@ -92,6 +93,7 @@ func streamRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, recor
 			pendingErrors = nil
 			pendingLineCount = 0
 			pendingLineBytes = 0
+			var warningsToCommit []bodies.Warning
 			if len(recordsToInsert) > 0 {
 				usage := diskGuard.Usage()
 				if usage.OverBudget() {
@@ -104,6 +106,7 @@ func streamRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, recor
 				if usage.NearBudget() {
 					logger.Warn("clickhouse disk usage above 90% of budget", "used_bytes", usage.UsedBytes, "budget_bytes", usage.BudgetBytes)
 				}
+				warningsToCommit = bodyStore.Store(context.WithoutCancel(request.Context()), recordsToInsert)
 				insertContext, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), insertTimeout)
 				defer cancel()
 				if err := recordWriter.Insert(insertContext, recordsToInsert); err != nil {
@@ -119,6 +122,12 @@ func streamRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, recor
 					break
 				}
 				committed.Errors = append(committed.Errors, rejection)
+			}
+			for _, warning := range warningsToCommit {
+				if len(committed.Warnings) >= loadedConfig.MaxBatchRecords {
+					break
+				}
+				committed.Warnings = append(committed.Warnings, warning)
 			}
 			return nil
 		}
@@ -154,6 +163,7 @@ func streamRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, recor
 				if line.parseError != nil {
 					pendingErrors = append(pendingErrors, recordError{Index: line.index, Error: line.parseError.Error()})
 				} else {
+					line.record.SourceIndex = line.index
 					pendingRecords = append(pendingRecords, line.record)
 				}
 				if pendingLineCount >= flushRecordLimit || pendingLineBytes >= flushByteLimit {

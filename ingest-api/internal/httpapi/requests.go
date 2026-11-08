@@ -17,6 +17,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/dilutedev/scrapelog/ingest-api/internal/apikeys"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/bodies"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ingest"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ratelimit"
@@ -32,15 +33,20 @@ type RecordWriter interface {
 	Insert(ctx context.Context, records []ingest.Record) error
 }
 
+type BodyStore interface {
+	Store(ctx context.Context, records []ingest.Record) []bodies.Warning
+}
+
 type recordError struct {
 	Index int    `json:"index"`
 	Error string `json:"error"`
 }
 
 type ingestSummary struct {
-	Accepted int           `json:"accepted"`
-	Rejected int           `json:"rejected"`
-	Errors   []recordError `json:"errors"`
+	Accepted int              `json:"accepted"`
+	Rejected int              `json:"rejected"`
+	Errors   []recordError    `json:"errors"`
+	Warnings []bodies.Warning `json:"warnings"`
 }
 
 var (
@@ -135,7 +141,7 @@ func writeRateLimited(responseWriter http.ResponseWriter, retryAfter time.Durati
 	writeError(responseWriter, http.StatusTooManyRequests, "rate limit exceeded")
 }
 
-func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, recordLimiter *ratelimit.Limiter, diskGuard DiskGuard, loadedConfig config.Config) func(http.ResponseWriter, *http.Request, apikeys.Identity) {
+func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, bodyStore BodyStore, recordLimiter *ratelimit.Limiter, diskGuard DiskGuard, loadedConfig config.Config) func(http.ResponseWriter, *http.Request, apikeys.Identity) {
 	return func(responseWriter http.ResponseWriter, request *http.Request, identity apikeys.Identity) {
 		usage := diskGuard.Usage()
 		if usage.OverBudget() {
@@ -168,7 +174,7 @@ func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, recor
 
 		receivedAt := time.Now().UTC()
 		records := make([]ingest.Record, 0)
-		summary := ingestSummary{Errors: []recordError{}}
+		summary := ingestSummary{Errors: []recordError{}, Warnings: []bodies.Warning{}}
 
 		err = decodeRecordArray(decodedLimit, loadedConfig.MaxBatchRecords, func(index int, rawRecord json.RawMessage) {
 			record, parseError := ingest.ParseRecord(rawRecord, identity.Project, receivedAt, loadedConfig.RedactedHeaders, loadedConfig.MaxBodyBytes)
@@ -176,6 +182,7 @@ func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, recor
 				summary.Errors = append(summary.Errors, recordError{Index: index, Error: parseError.Error()})
 				return
 			}
+			record.SourceIndex = index
 			records = append(records, record)
 		})
 		switch {
@@ -210,6 +217,7 @@ func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, recor
 		if usage.NearBudget() {
 			logger.Warn("clickhouse disk usage above 90% of budget", "used_bytes", usage.UsedBytes, "budget_bytes", usage.BudgetBytes)
 		}
+		summary.Warnings = bodyStore.Store(request.Context(), records)
 		insertContext, cancel := context.WithTimeout(request.Context(), insertTimeout)
 		defer cancel()
 		if err := recordWriter.Insert(insertContext, records); err != nil {

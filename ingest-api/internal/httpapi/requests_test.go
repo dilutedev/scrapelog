@@ -18,6 +18,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/dilutedev/scrapelog/ingest-api/internal/apikeys"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/bodies"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ingest"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/storage"
@@ -33,6 +34,37 @@ func (writer *fakeRecordWriter) Insert(ctx context.Context, records []ingest.Rec
 	writer.calls++
 	writer.received = records
 	return writer.err
+}
+
+type fakeBodyStore struct {
+	calls           int
+	warningsForCall func(callNumber int, records []ingest.Record) []bodies.Warning
+}
+
+func (store *fakeBodyStore) Store(ctx context.Context, records []ingest.Record) []bodies.Warning {
+	store.calls++
+	for index := range records {
+		if records[index].Body != nil {
+			records[index].BodyKey = "stored/" + records[index].RequestID
+			records[index].Body = nil
+		}
+	}
+	if store.warningsForCall == nil {
+		return []bodies.Warning{}
+	}
+	return store.warningsForCall(store.calls, records)
+}
+
+func warnForEveryRecord(callNumber int, records []ingest.Record) []bodies.Warning {
+	warnings := []bodies.Warning{}
+	for _, record := range records {
+		warnings = append(warnings, bodies.Warning{Index: record.SourceIndex, Warning: fmt.Sprintf("call %d", callNumber)})
+	}
+	return warnings
+}
+
+func warnForFirstRecord(callNumber int, records []ingest.Record) []bodies.Warning {
+	return []bodies.Warning{{Index: records[0].SourceIndex, Warning: fmt.Sprintf("call %d", callNumber)}}
 }
 
 type failingReader struct {
@@ -61,7 +93,7 @@ func serveIngest(writer *fakeRecordWriter, loadedConfig config.Config, body io.R
 		request.Header.Set("Content-Encoding", contentEncoding)
 	}
 	recorder := httptest.NewRecorder()
-	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeStorageReporter{}, &fakeDiskGuard{}, loadedConfig).ServeHTTP(recorder, request)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, loadedConfig).ServeHTTP(recorder, request)
 	return recorder
 }
 
@@ -78,7 +110,7 @@ func (refresher *twoKeyRefresher) Authenticate(fullKey string) (apikeys.Identity
 
 func newRateLimitedHandler(writer *fakeRecordWriter, loadedConfig config.Config) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &twoKeyRefresher{}, writer, &fakeStorageReporter{}, &fakeDiskGuard{}, loadedConfig)
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &twoKeyRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, loadedConfig)
 }
 
 func serveIngestWith(handler http.Handler, apiKey string, body io.Reader) *httptest.ResponseRecorder {
@@ -277,7 +309,7 @@ func TestIngestDoesNotLogRequestBodyContent(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer good-key")
 	recorder := httptest.NewRecorder()
 
-	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeStorageReporter{}, &fakeDiskGuard{}, bodyConfig).ServeHTTP(recorder, request)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, bodyConfig).ServeHTTP(recorder, request)
 
 	if strings.Contains(logOutput.String(), "secret-body-content") || strings.Contains(recorder.Body.String(), "secret-body-content") {
 		t.Fatalf("body content leaked: log %s response %s", logOutput.String(), recorder.Body.String())
@@ -418,7 +450,7 @@ func TestIngestInsertContextHasDeadline(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/v1/requests", strings.NewReader(recordsJSON(1)))
 	request.Header.Set("Authorization", "Bearer good-key")
 
-	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, deadlineWriter, &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(httptest.NewRecorder(), request)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, deadlineWriter, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(httptest.NewRecorder(), request)
 
 	if !deadlineWriter.hadDeadline {
 		t.Fatal("insert context has no deadline")
@@ -443,7 +475,7 @@ func TestIngestRequiresAPIKeyBeforeReadingBody(t *testing.T) {
 		}
 		recorder := httptest.NewRecorder()
 
-		NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(recorder, request)
+		NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(recorder, request)
 
 		if recorder.Code != http.StatusUnauthorized {
 			t.Errorf("%s: status %d, want 401", name, recorder.Code)
@@ -453,7 +485,7 @@ func TestIngestRequiresAPIKeyBeforeReadingBody(t *testing.T) {
 
 func newGuardedHandler(writer *fakeRecordWriter, guard *fakeDiskGuard, logOutput io.Writer, loadedConfig config.Config) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(logOutput, nil))
-	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeStorageReporter{}, guard, loadedConfig)
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, guard, loadedConfig)
 }
 
 func TestIngestOverBudgetRejectsWithoutReadingBodyOrSpendingTokens(t *testing.T) {
@@ -496,5 +528,75 @@ func TestIngestNearBudgetInsertsAndLogsWarningOnce(t *testing.T) {
 	}
 	if count := strings.Count(logOutput.String(), "clickhouse disk usage above 90% of budget"); count != 1 {
 		t.Fatalf("warning logged %d times, want 1; log %s", count, logOutput.String())
+	}
+}
+
+func newBodyStoreHandler(writer *fakeRecordWriter, bodyStore BodyStore, guard DiskGuard, loadedConfig config.Config) http.Handler {
+	loadedConfig.MaxBodyBytes = 1024
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, bodyStore, &fakeStorageReporter{}, guard, loadedConfig)
+}
+
+func TestIngestUploadsBodiesBeforeInsertAndReportsWarnings(t *testing.T) {
+	writer := &fakeRecordWriter{}
+	bodyStore := &fakeBodyStore{warningsForCall: warnForEveryRecord}
+	payload := `[{"method":"GET"},{"url":"https://a.com","method":"GET","request_id":"req-1","body":"hi"},{"url":"https://a.com","method":"GET","request_id":"req-2"}]`
+
+	recorder := serveIngestWith(newBodyStoreHandler(writer, bodyStore, &fakeDiskGuard{}, testIngestConfig), "good-key", strings.NewReader(payload))
+
+	summary := decodeSummary(t, recorder)
+	if recorder.Code != http.StatusOK || summary.Accepted != 2 || summary.Rejected != 1 {
+		t.Fatalf("status %d summary %+v", recorder.Code, summary)
+	}
+	wantWarnings := []bodies.Warning{{Index: 1, Warning: "call 1"}, {Index: 2, Warning: "call 1"}}
+	if fmt.Sprint(summary.Warnings) != fmt.Sprint(wantWarnings) {
+		t.Fatalf("warnings %+v, want %+v", summary.Warnings, wantWarnings)
+	}
+	if len(writer.received) != 2 || writer.received[0].BodyKey != "stored/req-1" || writer.received[1].BodyKey != "" {
+		t.Fatalf("writer received %+v", writer.received)
+	}
+}
+
+func TestIngestResponseAlwaysContainsEmptyWarningsList(t *testing.T) {
+	recorder := serveIngest(&fakeRecordWriter{}, testIngestConfig, strings.NewReader(recordsJSON(1)), "")
+
+	if !strings.Contains(recorder.Body.String(), `"warnings":[]`) {
+		t.Fatalf("body %s", recorder.Body.String())
+	}
+}
+
+func TestIngestWithoutS3AcceptsBodyWithWarningAtSourceIndex(t *testing.T) {
+	writer := &fakeRecordWriter{}
+	bodyStore := bodies.NewStore(nil, "bodies/", slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	payload := `[{"method":"GET"},{"url":"https://a.com","method":"GET","body":"hi"}]`
+
+	recorder := serveIngestWith(newBodyStoreHandler(writer, bodyStore, &fakeDiskGuard{}, testIngestConfig), "good-key", strings.NewReader(payload))
+
+	summary := decodeSummary(t, recorder)
+	if recorder.Code != http.StatusOK || summary.Accepted != 1 || len(summary.Warnings) != 1 {
+		t.Fatalf("status %d summary %+v", recorder.Code, summary)
+	}
+	if summary.Warnings[0] != (bodies.Warning{Index: 1, Warning: "body dropped: S3 is not configured"}) {
+		t.Fatalf("warnings %+v", summary.Warnings)
+	}
+	if writer.received[0].BodyKey != "" {
+		t.Fatalf("body key %q", writer.received[0].BodyKey)
+	}
+}
+
+func TestIngestRejectedRequestsNeverCallBodyStore(t *testing.T) {
+	writer := &fakeRecordWriter{}
+	bodyStore := &fakeBodyStore{}
+	overBudget := &fakeDiskGuard{usage: storage.Usage{UsedBytes: 1001, BudgetBytes: 1000}}
+	serveIngestWith(newBodyStoreHandler(writer, bodyStore, overBudget, testIngestConfig), "good-key", strings.NewReader(recordsJSON(1)))
+
+	handler := newBodyStoreHandler(writer, bodyStore, &fakeDiskGuard{}, rateLimitConfig())
+	serveIngestWith(handler, "good-key", strings.NewReader(recordsJSON(100)))
+	callsAfterAcceptedBatch := bodyStore.calls
+	recorder := serveIngestWith(handler, "good-key", strings.NewReader(recordsJSON(1)))
+
+	requireRateLimited(t, recorder)
+	if callsAfterAcceptedBatch != 1 || bodyStore.calls != 1 {
+		t.Fatalf("body store calls %d then %d, want 1 and 1", callsAfterAcceptedBatch, bodyStore.calls)
 	}
 }

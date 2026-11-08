@@ -14,6 +14,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 
 	"github.com/dilutedev/scrapelog/ingest-api/internal/apikeys"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/bodies"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/httpapi"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ingest"
@@ -88,12 +89,17 @@ func serve() int {
 		return 1
 	}
 	recordWriter := ingest.NewWriter(connection)
+	var bodyUploader bodies.Uploader
+	if loadedConfig.S3Endpoint != "" {
+		bodyUploader = bodies.NewS3Uploader(loadedConfig.S3Endpoint, loadedConfig.S3Bucket, loadedConfig.S3Region, loadedConfig.S3AccessKeyID, loadedConfig.S3SecretAccessKey)
+	}
+	bodyStore := bodies.NewStore(bodyUploader, loadedConfig.S3BodyPrefix, logger)
 	go keyCache.RunRefreshLoop(signalContext, logger)
 	go diskGuard.RunRefreshLoop(signalContext, logger)
 
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, storageStore, diskGuard, loadedConfig),
+		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, loadedConfig),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
