@@ -19,6 +19,8 @@ type Config struct {
 	RedactedHeaders    map[string]bool
 
 	RateLimitRecordsPerMinute int64
+
+	ClickHouseDiskBudgetBytes int64
 }
 
 func Load() (Config, error) {
@@ -44,7 +46,12 @@ func Load() (Config, error) {
 	if rateLimitRecordsPerMinute < maxBatchRecords {
 		return Config{}, errors.New("RATE_LIMIT_RECORDS_PER_MINUTE must be at least MAX_BATCH_RECORDS")
 	}
+	diskBudgetBytes, err := positiveIntegerOrDefault("CLICKHOUSE_DISK_BUDGET_BYTES", 25000000000)
+	if err != nil {
+		return Config{}, err
+	}
 	loadedConfig.MaxBatchRecords = int(maxBatchRecords)
+	loadedConfig.ClickHouseDiskBudgetBytes = diskBudgetBytes
 	loadedConfig.RateLimitRecordsPerMinute = rateLimitRecordsPerMinute
 	loadedConfig.MaxRequestBytes = maxRequestBytes
 	loadedConfig.RedactedHeaders = headerNameSet(valueOrDefault("REDACT_HEADERS", "authorization,cookie,proxy-authorization"))

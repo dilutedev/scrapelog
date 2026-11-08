@@ -28,6 +28,8 @@ func TestLoadAppliesDefaultsWhenOnlyPasswordIsSet(t *testing.T) {
 		RedactedHeaders:    map[string]bool{"authorization": true, "cookie": true, "proxy-authorization": true},
 
 		RateLimitRecordsPerMinute: 600000,
+
+		ClickHouseDiskBudgetBytes: 25000000000,
 	}
 	if !reflect.DeepEqual(loadedConfig, expectedConfig) {
 		t.Fatalf("got %+v, want %+v", loadedConfig, expectedConfig)
@@ -56,6 +58,8 @@ func TestLoadUsesProvidedValues(t *testing.T) {
 		RedactedHeaders:    map[string]bool{"authorization": true, "cookie": true, "proxy-authorization": true},
 
 		RateLimitRecordsPerMinute: 600000,
+
+		ClickHouseDiskBudgetBytes: 25000000000,
 	}
 	if !reflect.DeepEqual(loadedConfig, expectedConfig) {
 		t.Fatalf("got %+v, want %+v", loadedConfig, expectedConfig)
@@ -135,6 +139,30 @@ func TestLoadRateLimitRecordsPerMinute(t *testing.T) {
 	for _, value := range []string{"4999", "0", "-1", "abc"} {
 		t.Setenv("RATE_LIMIT_RECORDS_PER_MINUTE", value)
 		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "RATE_LIMIT_RECORDS_PER_MINUTE") {
+			t.Errorf("value %q: expected error, got %v", value, err)
+		}
+	}
+}
+
+func TestLoadClickHouseDiskBudgetBytes(t *testing.T) {
+	t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
+	t.Setenv("ADMIN_TOKEN", "admin-secret")
+
+	t.Setenv("CLICKHOUSE_DISK_BUDGET_BYTES", "")
+	loadedConfig, err := Load()
+	if err != nil || loadedConfig.ClickHouseDiskBudgetBytes != 25000000000 {
+		t.Fatalf("default: got %d, %v", loadedConfig.ClickHouseDiskBudgetBytes, err)
+	}
+
+	t.Setenv("CLICKHOUSE_DISK_BUDGET_BYTES", "5000000000")
+	loadedConfig, err = Load()
+	if err != nil || loadedConfig.ClickHouseDiskBudgetBytes != 5000000000 {
+		t.Fatalf("override: got %d, %v", loadedConfig.ClickHouseDiskBudgetBytes, err)
+	}
+
+	for _, value := range []string{"0", "-1", "abc"} {
+		t.Setenv("CLICKHOUSE_DISK_BUDGET_BYTES", value)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "CLICKHOUSE_DISK_BUDGET_BYTES") {
 			t.Errorf("value %q: expected error, got %v", value, err)
 		}
 	}

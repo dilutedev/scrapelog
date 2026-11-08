@@ -25,7 +25,7 @@ func (pinger *fakePinger) Ping(ctx context.Context) error {
 func requestHealth(pinger *fakePinger) *httptest.ResponseRecorder {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	recorder := httptest.NewRecorder()
-	NewHandler(logger, pinger, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, config.Config{AdminToken: "admin-token"}).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
+	NewHandler(logger, pinger, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeStorageReporter{}, &fakeDiskGuard{}, config.Config{AdminToken: "admin-token"}).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
 	return recorder
 }
 

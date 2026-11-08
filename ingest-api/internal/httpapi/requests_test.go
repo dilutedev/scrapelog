@@ -20,6 +20,7 @@ import (
 	"github.com/dilutedev/scrapelog/ingest-api/internal/apikeys"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ingest"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/storage"
 )
 
 type fakeRecordWriter struct {
@@ -60,7 +61,7 @@ func serveIngest(writer *fakeRecordWriter, loadedConfig config.Config, body io.R
 		request.Header.Set("Content-Encoding", contentEncoding)
 	}
 	recorder := httptest.NewRecorder()
-	NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, loadedConfig).ServeHTTP(recorder, request)
+	NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeStorageReporter{}, &fakeDiskGuard{}, loadedConfig).ServeHTTP(recorder, request)
 	return recorder
 }
 
@@ -77,7 +78,7 @@ func (refresher *twoKeyRefresher) Authenticate(fullKey string) (apikeys.Identity
 
 func newRateLimitedHandler(writer *fakeRecordWriter, loadedConfig config.Config) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &twoKeyRefresher{}, writer, loadedConfig)
+	return NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &twoKeyRefresher{}, writer, &fakeStorageReporter{}, &fakeDiskGuard{}, loadedConfig)
 }
 
 func serveIngestWith(handler http.Handler, apiKey string, body io.Reader) *httptest.ResponseRecorder {
@@ -379,7 +380,7 @@ func TestIngestInsertContextHasDeadline(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/v1/requests", strings.NewReader(recordsJSON(1)))
 	request.Header.Set("Authorization", "Bearer good-key")
 
-	NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, deadlineWriter, testIngestConfig).ServeHTTP(httptest.NewRecorder(), request)
+	NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, deadlineWriter, &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(httptest.NewRecorder(), request)
 
 	if !deadlineWriter.hadDeadline {
 		t.Fatal("insert context has no deadline")
@@ -404,10 +405,58 @@ func TestIngestRequiresAPIKeyBeforeReadingBody(t *testing.T) {
 		}
 		recorder := httptest.NewRecorder()
 
-		NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, testIngestConfig).ServeHTTP(recorder, request)
+		NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(recorder, request)
 
 		if recorder.Code != http.StatusUnauthorized {
 			t.Errorf("%s: status %d, want 401", name, recorder.Code)
 		}
+	}
+}
+
+func newGuardedHandler(writer *fakeRecordWriter, guard *fakeDiskGuard, logOutput io.Writer, loadedConfig config.Config) http.Handler {
+	logger := slog.New(slog.NewJSONHandler(logOutput, nil))
+	return NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeStorageReporter{}, guard, loadedConfig)
+}
+
+func TestIngestOverBudgetRejectsWithoutReadingBodyOrSpendingTokens(t *testing.T) {
+	writer := &fakeRecordWriter{}
+	guard := &fakeDiskGuard{usage: storage.Usage{UsedBytes: 1001, BudgetBytes: 1000}}
+	handler := newGuardedHandler(writer, guard, io.Discard, rateLimitConfig())
+
+	recorder := serveIngestWith(handler, "good-key", failingReader{t: t})
+
+	if recorder.Code != http.StatusInsufficientStorage {
+		t.Fatalf("status %d, want 507, body %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Body.String() != "{\"error\":\"storage budget exceeded\"}\n" {
+		t.Fatalf("body %q", recorder.Body.String())
+	}
+	if recorder.Header().Get("Retry-After") != "" {
+		t.Fatalf("unexpected Retry-After %q", recorder.Header().Get("Retry-After"))
+	}
+	if writer.calls != 0 {
+		t.Fatalf("writer called %d times, want 0", writer.calls)
+	}
+
+	guard.usage = storage.Usage{UsedBytes: 10, BudgetBytes: 1000}
+	recorder = serveIngestWith(handler, "good-key", strings.NewReader(recordsJSON(100)))
+	if recorder.Code != http.StatusOK || len(writer.received) != 100 {
+		t.Fatalf("after recovery: status %d body %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestIngestNearBudgetInsertsAndLogsWarningOnce(t *testing.T) {
+	writer := &fakeRecordWriter{}
+	guard := &fakeDiskGuard{usage: storage.Usage{UsedBytes: 950, BudgetBytes: 1000}}
+	var logOutput bytes.Buffer
+	handler := newGuardedHandler(writer, guard, &logOutput, testIngestConfig)
+
+	recorder := serveIngestWith(handler, "good-key", strings.NewReader(recordsJSON(3)))
+
+	if recorder.Code != http.StatusOK || writer.calls != 1 {
+		t.Fatalf("status %d, writer calls %d", recorder.Code, writer.calls)
+	}
+	if count := strings.Count(logOutput.String(), "clickhouse disk usage above 90% of budget"); count != 1 {
+		t.Fatalf("warning logged %d times, want 1; log %s", count, logOutput.String())
 	}
 }

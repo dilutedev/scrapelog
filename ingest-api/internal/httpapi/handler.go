@@ -20,7 +20,7 @@ type KeyCache interface {
 	KeyRefresher
 }
 
-func NewHandler(logger *slog.Logger, clickHouse ClickHousePinger, keyStore KeyStore, keyCache KeyCache, recordWriter RecordWriter, loadedConfig config.Config) http.Handler {
+func NewHandler(logger *slog.Logger, clickHouse ClickHousePinger, keyStore KeyStore, keyCache KeyCache, recordWriter RecordWriter, storageReporter StorageReporter, diskGuard DiskGuard, loadedConfig config.Config) http.Handler {
 	adminTokenHash := sha256.Sum256([]byte(loadedConfig.AdminToken))
 	recordLimiter := ratelimit.New(loadedConfig.RateLimitRecordsPerMinute, time.Now)
 	router := http.NewServeMux()
@@ -28,7 +28,9 @@ func NewHandler(logger *slog.Logger, clickHouse ClickHousePinger, keyStore KeySt
 	router.HandleFunc("POST /v1/admin/keys", requireAdmin(adminTokenHash, createKeyHandler(logger, keyStore, keyCache)))
 	router.HandleFunc("GET /v1/admin/keys", requireAdmin(adminTokenHash, listKeysHandler(logger, keyStore)))
 	router.HandleFunc("DELETE /v1/admin/keys/{key_id}", requireAdmin(adminTokenHash, revokeKeyHandler(logger, keyStore, keyCache)))
-	router.HandleFunc("POST /v1/requests", requireAPIKey(keyCache, ingestRequestsHandler(logger, recordWriter, recordLimiter, loadedConfig)))
+	router.HandleFunc("POST /v1/requests", requireAPIKey(keyCache, ingestRequestsHandler(logger, recordWriter, recordLimiter, diskGuard, loadedConfig)))
+	router.HandleFunc("GET /v1/stats", requireAPIKey(keyCache, statsHandler(logger, storageReporter)))
+	router.HandleFunc("GET /v1/admin/storage", requireAdmin(adminTokenHash, storageHandler(logger, storageReporter, uint64(loadedConfig.ClickHouseDiskBudgetBytes))))
 	return router
 }
 

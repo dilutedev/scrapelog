@@ -131,8 +131,13 @@ func writeRateLimited(responseWriter http.ResponseWriter, retryAfter time.Durati
 	writeError(responseWriter, http.StatusTooManyRequests, "rate limit exceeded")
 }
 
-func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, recordLimiter *ratelimit.Limiter, loadedConfig config.Config) func(http.ResponseWriter, *http.Request, apikeys.Identity) {
+func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, recordLimiter *ratelimit.Limiter, diskGuard DiskGuard, loadedConfig config.Config) func(http.ResponseWriter, *http.Request, apikeys.Identity) {
 	return func(responseWriter http.ResponseWriter, request *http.Request, identity apikeys.Identity) {
+		usage := diskGuard.Usage()
+		if usage.OverBudget() {
+			writeError(responseWriter, http.StatusInsufficientStorage, "storage budget exceeded")
+			return
+		}
 		if allowed, retryAfter := recordLimiter.HasToken(identity.KeyID); !allowed {
 			writeRateLimited(responseWriter, retryAfter)
 			return
@@ -198,6 +203,9 @@ func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, recor
 			return
 		}
 
+		if usage.NearBudget() {
+			logger.Warn("clickhouse disk usage above 90% of budget", "used_bytes", usage.UsedBytes, "budget_bytes", usage.BudgetBytes)
+		}
 		insertContext, cancel := context.WithTimeout(request.Context(), insertTimeout)
 		defer cancel()
 		if err := recordWriter.Insert(insertContext, records); err != nil {
