@@ -1,0 +1,846 @@
+{
+  "uid": "scrapelog-explorer",
+  "title": "Request explorer",
+  "tags": [
+    "scrapelog"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 42,
+  "editable": false,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "refresh": "",
+  "templating": {
+    "list": [
+      {
+        "name": "project",
+        "label": "Project",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
+        "query": "SELECT DISTINCT project FROM scrapelog.requests_hourly WHERE $__timeFilter(hour) ORDER BY project",
+        "definition": "SELECT DISTINCT project FROM scrapelog.requests_hourly WHERE $__timeFilter(hour) ORDER BY project",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "sort": 0
+      },
+      {
+        "name": "scraper",
+        "label": "Scraper",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
+        "query": "SELECT DISTINCT scraper FROM scrapelog.requests_hourly WHERE $__timeFilter(hour) AND project IN (${project:singlequote}) ORDER BY scraper",
+        "definition": "SELECT DISTINCT scraper FROM scrapelog.requests_hourly WHERE $__timeFilter(hour) AND project IN (${project:singlequote}) ORDER BY scraper",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "sort": 0
+      },
+      {
+        "name": "domain",
+        "label": "Domain",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
+        "query": "SELECT DISTINCT domain FROM scrapelog.requests_hourly WHERE $__timeFilter(hour) AND project IN (${project:singlequote}) AND scraper IN (${scraper:singlequote}) ORDER BY domain",
+        "definition": "SELECT DISTINCT domain FROM scrapelog.requests_hourly WHERE $__timeFilter(hour) AND project IN (${project:singlequote}) AND scraper IN (${scraper:singlequote}) ORDER BY domain",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "sort": 0
+      },
+      {
+        "name": "status",
+        "label": "Status",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
+        "query": "SELECT DISTINCT status FROM scrapelog.requests_hourly WHERE $__timeFilter(hour) AND project IN (${project:singlequote}) ORDER BY status",
+        "definition": "SELECT DISTINCT status FROM scrapelog.requests_hourly WHERE $__timeFilter(hour) AND project IN (${project:singlequote}) ORDER BY status",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "sort": 0
+      },
+      {
+        "name": "url_contains",
+        "label": "URL contains",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "hide": 0
+      },
+      {
+        "name": "tls_ja4",
+        "label": "TLS JA4",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "hide": 0
+      },
+      {
+        "name": "request_id",
+        "label": "Request ID",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Recent requests (newest 500)",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 14
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT ts AS time, project, scraper, method, status, domain, path(url) AS path, latency_ms, proxy, tls_profile, error, request_id FROM scrapelog.requests WHERE $__timeFilter(ts) AND project IN (${project:singlequote}) AND scraper IN (${scraper:singlequote}) AND domain IN (${domain:singlequote}) AND status IN (${status:singlequote}) AND (decodeURLComponent('${url_contains:percentencode}') = '' OR positionCaseInsensitive(url, decodeURLComponent('${url_contains:percentencode}')) > 0) AND (decodeURLComponent('${tls_ja4:percentencode}') = '' OR tls_ja4 = decodeURLComponent('${tls_ja4:percentencode}')) ORDER BY ts DESC LIMIT 500"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "time"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              },
+              {
+                "id": "custom.width",
+                "value": 175
+              },
+              {
+                "id": "displayName",
+                "value": "Time"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "project"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "displayName",
+                "value": "Project"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "scraper"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "displayName",
+                "value": "Scraper"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "method"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              },
+              {
+                "id": "displayName",
+                "value": "Method"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "no response",
+                        "color": "purple",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 200,
+                      "to": 299,
+                      "result": {
+                        "color": "green",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 300,
+                      "to": 399,
+                      "result": {
+                        "color": "blue",
+                        "index": 2
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 400,
+                      "to": 499,
+                      "result": {
+                        "color": "orange",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 500,
+                      "to": 999,
+                      "result": {
+                        "color": "red",
+                        "index": 4
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "displayName",
+                "value": "Status"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "domain"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 150
+              },
+              {
+                "id": "displayName",
+                "value": "Domain"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "path"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 200
+              },
+              {
+                "id": "displayName",
+                "value": "Path"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open full record",
+                    "url": "/d/scrapelog-explorer/request-explorer?${__url_time_range}&${project:queryparam}&${scraper:queryparam}&${domain:queryparam}&${status:queryparam}&${url_contains:queryparam}&${tls_ja4:queryparam}&var-request_id=${__data.fields.request_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "latency_ms"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "displayName",
+                "value": "Latency"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "proxy"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              },
+              {
+                "id": "displayName",
+                "value": "Proxy"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tls_profile"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "displayName",
+                "value": "TLS profile"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Error"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "request_id"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Time",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": []
+    },
+    {
+      "id": 2,
+      "title": "Record: ${request_id}",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 10,
+        "h": 16
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT name AS field, value FROM scrapelog.requests ARRAY JOIN ['request_id', 'ts', 'received_at', 'project', 'scraper', 'method', 'url', 'status', 'latency_ms', 'response_size', 'proxy', 'http_version', 'tls_profile', 'tls_ja3', 'tls_ja4', 'error', 'body_key'] AS name, [request_id, toString(ts), toString(received_at), project, scraper, method, url, toString(status), toString(latency_ms), toString(response_size), proxy, http_version, tls_profile, tls_ja3, tls_ja4, error, body_key] AS value WHERE $__timeFilter(ts) AND request_id = decodeURLComponent('${request_id:percentencode}') LIMIT 17"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "field"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
+              },
+              {
+                "id": "displayName",
+                "value": "Field"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "value"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Value"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "transformations": []
+    },
+    {
+      "id": 3,
+      "title": "Request headers",
+      "type": "table",
+      "gridPos": {
+        "x": 10,
+        "y": 14,
+        "w": 14,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT header, value FROM scrapelog.requests ARRAY JOIN mapKeys(request_headers) AS header, mapValues(request_headers) AS value WHERE $__timeFilter(ts) AND request_id = decodeURLComponent('${request_id:percentencode}') ORDER BY header"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "header"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              },
+              {
+                "id": "displayName",
+                "value": "Header"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "value"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Value"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "transformations": []
+    },
+    {
+      "id": 4,
+      "title": "Response headers",
+      "type": "table",
+      "gridPos": {
+        "x": 10,
+        "y": 22,
+        "w": 14,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT header, value FROM scrapelog.requests ARRAY JOIN mapKeys(response_headers) AS header, mapValues(response_headers) AS value WHERE $__timeFilter(ts) AND request_id = decodeURLComponent('${request_id:percentencode}') ORDER BY header"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "header"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              },
+              {
+                "id": "displayName",
+                "value": "Header"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "value"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Value"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "transformations": []
+    },
+    {
+      "id": 5,
+      "title": "Tags",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 10,
+        "h": 7
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT tag, value FROM scrapelog.requests ARRAY JOIN mapKeys(tags) AS tag, mapValues(tags) AS value WHERE $__timeFilter(ts) AND request_id = decodeURLComponent('${request_id:percentencode}') ORDER BY tag"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tag"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              },
+              {
+                "id": "displayName",
+                "value": "Tag"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "value"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Value"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "transformations": []
+    },
+    {
+      "id": 6,
+      "title": "Most common errors",
+      "type": "table",
+      "gridPos": {
+        "x": 10,
+        "y": 30,
+        "w": 14,
+        "h": 7
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "queryType": "table",
+          "rawSql": "SELECT error, count() AS occurrences, uniqExact(domain) AS domains, max(ts) AS last_seen FROM scrapelog.requests WHERE $__timeFilter(ts) AND project IN (${project:singlequote}) AND scraper IN (${scraper:singlequote}) AND domain IN (${domain:singlequote}) AND status IN (${status:singlequote}) AND (decodeURLComponent('${url_contains:percentencode}') = '' OR positionCaseInsensitive(url, decodeURLComponent('${url_contains:percentencode}')) > 0) AND (decodeURLComponent('${tls_ja4:percentencode}') = '' OR tls_ja4 = decodeURLComponent('${tls_ja4:percentencode}')) AND error != '' GROUP BY error ORDER BY occurrences DESC LIMIT 50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Error"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "occurrences"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              },
+              {
+                "id": "displayName",
+                "value": "Occurrences"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "domains"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              },
+              {
+                "id": "displayName",
+                "value": "Domains"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "last_seen"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              },
+              {
+                "id": "custom.width",
+                "value": 175
+              },
+              {
+                "id": "displayName",
+                "value": "Last seen"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "transformations": []
+    }
+  ]
+}

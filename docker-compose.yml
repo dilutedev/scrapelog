@@ -49,8 +49,37 @@ services:
       retries: 12
       start_period: 5s
 
+  grafana:
+    image: grafana/grafana:13.3.0
+    restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000/}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_PLUGINS_PREINSTALL_SYNC: grafana-clickhouse-datasource@4.23.4
+      CLICKHOUSE_READER_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:?set CLICKHOUSE_READER_PASSWORD in .env}
+    ports:
+      - 127.0.0.1:${GRAFANA_PORT:-3000}:3000
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/datasources/clickhouse.yml:/etc/grafana/provisioning/datasources/clickhouse.yml:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+    networks:
+      - scrapelog
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 60s
+
 networks:
   scrapelog: {}
 
 volumes:
   clickhouse_data: {}
+  grafana_data: {}
