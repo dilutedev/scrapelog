@@ -29,6 +29,7 @@ func TestParseRecordRejectsInvalidRecords(t *testing.T) {
 		"status negative":      {`{"url":"https://a.com","method":"GET","status":-1}`, "status must be between 0 and 999"},
 		"status as string":     {`{"url":"https://a.com","method":"GET","status":"200"}`, "status must be a int"},
 		"non-string header":    {`{"url":"https://a.com","method":"GET","request_headers":{"accept":5}}`, "request_headers.accept must be a string"},
+		"malformed json":       {`{not json`, "record is not valid JSON"},
 		"string element":       {`"x"`, "record must be a JSON object"},
 		"number element":       {`5`, "record must be a JSON object"},
 		"ts too old":           {`{"url":"https://a.com","method":"GET","ts":"2026-09-08T11:59:59Z"}`, "ts is more than 60 days in the past"},

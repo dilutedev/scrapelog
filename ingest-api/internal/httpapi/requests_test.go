@@ -61,7 +61,7 @@ func serveIngest(writer *fakeRecordWriter, loadedConfig config.Config, body io.R
 		request.Header.Set("Content-Encoding", contentEncoding)
 	}
 	recorder := httptest.NewRecorder()
-	NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeStorageReporter{}, &fakeDiskGuard{}, loadedConfig).ServeHTTP(recorder, request)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeStorageReporter{}, &fakeDiskGuard{}, loadedConfig).ServeHTTP(recorder, request)
 	return recorder
 }
 
@@ -78,7 +78,7 @@ func (refresher *twoKeyRefresher) Authenticate(fullKey string) (apikeys.Identity
 
 func newRateLimitedHandler(writer *fakeRecordWriter, loadedConfig config.Config) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &twoKeyRefresher{}, writer, &fakeStorageReporter{}, &fakeDiskGuard{}, loadedConfig)
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &twoKeyRefresher{}, writer, &fakeStorageReporter{}, &fakeDiskGuard{}, loadedConfig)
 }
 
 func serveIngestWith(handler http.Handler, apiKey string, body io.Reader) *httptest.ResponseRecorder {
@@ -380,7 +380,7 @@ func TestIngestInsertContextHasDeadline(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/v1/requests", strings.NewReader(recordsJSON(1)))
 	request.Header.Set("Authorization", "Bearer good-key")
 
-	NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, deadlineWriter, &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(httptest.NewRecorder(), request)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, deadlineWriter, &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(httptest.NewRecorder(), request)
 
 	if !deadlineWriter.hadDeadline {
 		t.Fatal("insert context has no deadline")
@@ -405,7 +405,7 @@ func TestIngestRequiresAPIKeyBeforeReadingBody(t *testing.T) {
 		}
 		recorder := httptest.NewRecorder()
 
-		NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(recorder, request)
+		NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(recorder, request)
 
 		if recorder.Code != http.StatusUnauthorized {
 			t.Errorf("%s: status %d, want 401", name, recorder.Code)
@@ -415,7 +415,7 @@ func TestIngestRequiresAPIKeyBeforeReadingBody(t *testing.T) {
 
 func newGuardedHandler(writer *fakeRecordWriter, guard *fakeDiskGuard, logOutput io.Writer, loadedConfig config.Config) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(logOutput, nil))
-	return NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeStorageReporter{}, guard, loadedConfig)
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeStorageReporter{}, guard, loadedConfig)
 }
 
 func TestIngestOverBudgetRejectsWithoutReadingBodyOrSpendingTokens(t *testing.T) {

@@ -93,7 +93,7 @@ func serve() int {
 
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewHandler(logger, connection, keyStore, keyCache, recordWriter, storageStore, diskGuard, loadedConfig),
+		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, storageStore, diskGuard, loadedConfig),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

@@ -125,9 +125,13 @@ func decodeRecordArray(reader io.Reader, maxRecords int, eachRecord func(index i
 	return err
 }
 
-func writeRateLimited(responseWriter http.ResponseWriter, retryAfter time.Duration) {
+func setRetryAfter(responseWriter http.ResponseWriter, retryAfter time.Duration) {
 	retryAfterSeconds := max(1, int(math.Ceil(retryAfter.Seconds())))
 	responseWriter.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+}
+
+func writeRateLimited(responseWriter http.ResponseWriter, retryAfter time.Duration) {
+	setRetryAfter(responseWriter, retryAfter)
 	writeError(responseWriter, http.StatusTooManyRequests, "rate limit exceeded")
 }
 

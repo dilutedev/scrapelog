@@ -53,7 +53,7 @@ func serveStorageRoute(reporter *fakeStorageReporter, path string, authorization
 	}
 	recorder := httptest.NewRecorder()
 	loadedConfig := config.Config{AdminToken: "admin-token", ClickHouseDiskBudgetBytes: 5000}
-	NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, reporter, &fakeDiskGuard{}, loadedConfig).ServeHTTP(recorder, request)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, reporter, &fakeDiskGuard{}, loadedConfig).ServeHTTP(recorder, request)
 	return recorder
 }
 

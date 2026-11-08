@@ -64,6 +64,10 @@ type Record struct {
 func ParseRecord(rawRecord []byte, project string, receivedAt time.Time, redactedHeaders map[string]bool) (Record, error) {
 	var input recordInput
 	if err := json.Unmarshal(rawRecord, &input); err != nil {
+		var syntaxError *json.SyntaxError
+		if errors.As(err, &syntaxError) {
+			return Record{}, errors.New("record is not valid JSON")
+		}
 		var typeError *json.UnmarshalTypeError
 		if errors.As(err, &typeError) {
 			if typeError.Field == "" {
