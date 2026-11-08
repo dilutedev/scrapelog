@@ -21,6 +21,8 @@ CREATE TABLE scrapelog.requests
     response_headers Map(LowCardinality(String), String) CODEC(ZSTD(3)),
     response_size UInt32,
     body_key String,
+    request_body String CODEC(ZSTD(3)),
+    request_body_encoding LowCardinality(String),
     error String CODEC(ZSTD(3)),
     tags Map(LowCardinality(String), String)
 )

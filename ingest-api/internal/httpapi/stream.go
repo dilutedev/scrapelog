@@ -55,7 +55,7 @@ func readStreamLines(contentEncoding string, body io.Reader, loadedConfig config
 		if len(line) == 0 {
 			continue
 		}
-		record, parseError := ingest.ParseRecord(line, project, time.Now().UTC(), loadedConfig.RedactedHeaders)
+		record, parseError := ingest.ParseRecord(line, project, time.Now().UTC(), loadedConfig.RedactedHeaders, loadedConfig.MaxBodyBytes)
 		select {
 		case lines <- streamLine{index: index, lineBytes: len(line), record: record, parseError: parseError}:
 		case <-stopReading:

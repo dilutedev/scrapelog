@@ -171,7 +171,7 @@ func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, recor
 		summary := ingestSummary{Errors: []recordError{}}
 
 		err = decodeRecordArray(decodedLimit, loadedConfig.MaxBatchRecords, func(index int, rawRecord json.RawMessage) {
-			record, parseError := ingest.ParseRecord(rawRecord, identity.Project, receivedAt, loadedConfig.RedactedHeaders)
+			record, parseError := ingest.ParseRecord(rawRecord, identity.Project, receivedAt, loadedConfig.RedactedHeaders, loadedConfig.MaxBodyBytes)
 			if parseError != nil {
 				summary.Errors = append(summary.Errors, recordError{Index: index, Error: parseError.Error()})
 				return

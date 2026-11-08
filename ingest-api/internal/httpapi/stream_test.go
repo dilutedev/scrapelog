@@ -181,6 +181,27 @@ func TestStreamInvalidLinesAreRejectedAndStreamContinues(t *testing.T) {
 	}
 }
 
+func TestStreamStoresRequestBodyAndRejectsOverCapRecord(t *testing.T) {
+	writer := newChunkRecordingWriter()
+	bodyConfig := streamConfig(100)
+	bodyConfig.MaxBodyBytes = 8
+	body := `{"url":"https://a.com","method":"GET","request_body":"aGk=","request_body_encoding":"base64"}` + "\n" +
+		`{"url":"https://a.com","method":"POST","request_body":"secret-body-content"}` + "\n"
+
+	recorder := serveStreamSimple(writer, bodyConfig, body)
+
+	response := requireStatus(t, recorder, http.StatusOK)
+	if response.Accepted != 1 || response.Rejected != 1 || len(response.Errors) != 1 {
+		t.Fatalf("response %+v", response)
+	}
+	if response.Errors[0].Index != 1 || response.Errors[0].Error != "request_body exceeds MAX_BODY_BYTES (8 bytes)" {
+		t.Fatalf("errors %+v", response.Errors)
+	}
+	if len(writer.chunks) != 1 || writer.chunks[0][0].RequestBody != "aGk=" || writer.chunks[0][0].RequestBodyEncoding != "base64" {
+		t.Fatalf("chunks %+v", writer.chunks)
+	}
+}
+
 func TestStreamHandlesFinalLineWithoutNewline(t *testing.T) {
 	writer := newChunkRecordingWriter()
 

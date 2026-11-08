@@ -246,6 +246,44 @@ func TestIngestAcceptsValidRecordsAndReportsInvalidOnes(t *testing.T) {
 	}
 }
 
+func TestIngestStoresRequestBodyAndRejectsOverCapRecord(t *testing.T) {
+	writer := &fakeRecordWriter{}
+	bodyConfig := testIngestConfig
+	bodyConfig.MaxBodyBytes = 8
+	payload := `[{"url":"https://a.com","method":"GET","request_body":"aGk=","request_body_encoding":"base64"},` +
+		`{"url":"https://a.com","method":"POST","request_body":"secret-body-content"}]`
+
+	recorder := serveIngest(writer, bodyConfig, strings.NewReader(payload), "")
+
+	summary := decodeSummary(t, recorder)
+	if summary.Accepted != 1 || summary.Rejected != 1 || len(summary.Errors) != 1 {
+		t.Fatalf("unexpected summary %+v", summary)
+	}
+	if summary.Errors[0].Index != 1 || summary.Errors[0].Error != "request_body exceeds MAX_BODY_BYTES (8 bytes)" {
+		t.Fatalf("unexpected errors %+v", summary.Errors)
+	}
+	if len(writer.received) != 1 || writer.received[0].RequestBody != "aGk=" || writer.received[0].RequestBodyEncoding != "base64" {
+		t.Fatalf("writer received %+v", writer.received)
+	}
+}
+
+func TestIngestDoesNotLogRequestBodyContent(t *testing.T) {
+	var logOutput bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logOutput, nil))
+	bodyConfig := testIngestConfig
+	bodyConfig.MaxBodyBytes = 8
+	payload := `[{"url":"https://a.com","method":"POST","request_body":"secret-body-content"}]`
+	request := httptest.NewRequest(http.MethodPost, "/v1/requests", strings.NewReader(payload))
+	request.Header.Set("Authorization", "Bearer good-key")
+	recorder := httptest.NewRecorder()
+
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeStorageReporter{}, &fakeDiskGuard{}, bodyConfig).ServeHTTP(recorder, request)
+
+	if strings.Contains(logOutput.String(), "secret-body-content") || strings.Contains(recorder.Body.String(), "secret-body-content") {
+		t.Fatalf("body content leaked: log %s response %s", logOutput.String(), recorder.Body.String())
+	}
+}
+
 func TestIngestRejectsBatchWithNoValidRecords(t *testing.T) {
 	for name, body := range map[string]string{"all invalid": recordsJSON(2, 0, 1), "empty array": "[]"} {
 		writer := &fakeRecordWriter{}

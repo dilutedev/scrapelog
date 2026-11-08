@@ -16,6 +16,7 @@ type Config struct {
 	AdminToken         string
 	MaxBatchRecords    int
 	MaxRequestBytes    int64
+	MaxBodyBytes       int64
 	RedactedHeaders    map[string]bool
 
 	RateLimitRecordsPerMinute int64
@@ -39,6 +40,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	maxBodyBytes, err := positiveIntegerOrDefault("MAX_BODY_BYTES", 2097152)
+	if err != nil {
+		return Config{}, err
+	}
 	rateLimitRecordsPerMinute, err := positiveIntegerOrDefault("RATE_LIMIT_RECORDS_PER_MINUTE", 600000)
 	if err != nil {
 		return Config{}, err
@@ -54,6 +59,7 @@ func Load() (Config, error) {
 	loadedConfig.ClickHouseDiskBudgetBytes = diskBudgetBytes
 	loadedConfig.RateLimitRecordsPerMinute = rateLimitRecordsPerMinute
 	loadedConfig.MaxRequestBytes = maxRequestBytes
+	loadedConfig.MaxBodyBytes = maxBodyBytes
 	loadedConfig.RedactedHeaders = headerNameSet(valueOrDefault("REDACT_HEADERS", "authorization,cookie,proxy-authorization"))
 	if loadedConfig.ClickHousePassword == "" {
 		return Config{}, errors.New("CLICKHOUSE_INGEST_PASSWORD is required")

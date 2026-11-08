@@ -25,6 +25,7 @@ func TestLoadAppliesDefaultsWhenOnlyPasswordIsSet(t *testing.T) {
 		AdminToken:         "admin-secret",
 		MaxBatchRecords:    5000,
 		MaxRequestBytes:    10485760,
+		MaxBodyBytes:       2097152,
 		RedactedHeaders:    map[string]bool{"authorization": true, "cookie": true, "proxy-authorization": true},
 
 		RateLimitRecordsPerMinute: 600000,
@@ -55,6 +56,7 @@ func TestLoadUsesProvidedValues(t *testing.T) {
 		AdminToken:         "admin-secret",
 		MaxBatchRecords:    5000,
 		MaxRequestBytes:    10485760,
+		MaxBodyBytes:       2097152,
 		RedactedHeaders:    map[string]bool{"authorization": true, "cookie": true, "proxy-authorization": true},
 
 		RateLimitRecordsPerMinute: 600000,
@@ -90,10 +92,11 @@ func TestLoadRejectsInvalidLimits(t *testing.T) {
 	t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
 	t.Setenv("ADMIN_TOKEN", "admin-secret")
 
-	for _, variableName := range []string{"MAX_BATCH_RECORDS", "MAX_REQUEST_BYTES"} {
+	for _, variableName := range []string{"MAX_BATCH_RECORDS", "MAX_REQUEST_BYTES", "MAX_BODY_BYTES"} {
 		for _, value := range []string{"abc", "0", "-1"} {
 			t.Setenv("MAX_BATCH_RECORDS", "")
 			t.Setenv("MAX_REQUEST_BYTES", "")
+			t.Setenv("MAX_BODY_BYTES", "")
 			t.Setenv(variableName, value)
 
 			_, err := Load()
@@ -165,5 +168,22 @@ func TestLoadClickHouseDiskBudgetBytes(t *testing.T) {
 		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "CLICKHOUSE_DISK_BUDGET_BYTES") {
 			t.Errorf("value %q: expected error, got %v", value, err)
 		}
+	}
+}
+
+func TestLoadMaxBodyBytes(t *testing.T) {
+	t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
+	t.Setenv("ADMIN_TOKEN", "admin-secret")
+
+	t.Setenv("MAX_BODY_BYTES", "")
+	loadedConfig, err := Load()
+	if err != nil || loadedConfig.MaxBodyBytes != 2097152 {
+		t.Fatalf("default: got %d, %v", loadedConfig.MaxBodyBytes, err)
+	}
+
+	t.Setenv("MAX_BODY_BYTES", "4096")
+	loadedConfig, err = Load()
+	if err != nil || loadedConfig.MaxBodyBytes != 4096 {
+		t.Fatalf("override: got %d, %v", loadedConfig.MaxBodyBytes, err)
 	}
 }

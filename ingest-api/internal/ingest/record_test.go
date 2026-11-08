@@ -1,7 +1,9 @@
 package ingest
 
 import (
+	"encoding/base64"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -9,10 +11,12 @@ import (
 
 var defaultRedactedHeaders = map[string]bool{"authorization": true, "cookie": true, "proxy-authorization": true}
 
+const testMaxBodyBytes = 16
+
 var testReceivedAt = time.Date(2026, 11, 8, 12, 0, 0, 123000000, time.UTC)
 
 func parse(rawRecord string) (Record, error) {
-	return ParseRecord([]byte(rawRecord), "acme", testReceivedAt, defaultRedactedHeaders)
+	return ParseRecord([]byte(rawRecord), "acme", testReceivedAt, defaultRedactedHeaders, testMaxBodyBytes)
 }
 
 func TestParseRecordRejectsInvalidRecords(t *testing.T) {
@@ -20,22 +24,29 @@ func TestParseRecordRejectsInvalidRecords(t *testing.T) {
 		rawRecord string
 		message   string
 	}{
-		"missing url":          {`{"method":"GET"}`, "url is required"},
-		"blank url":            {`{"method":"GET","url":"  "}`, "url is required"},
-		"relative url":         {`{"method":"GET","url":"/path"}`, "url must be an absolute URL"},
-		"missing method":       {`{"url":"https://a.com"}`, "method is required"},
-		"blank method":         {`{"url":"https://a.com","method":"  "}`, "method is required"},
-		"status too high":      {`{"url":"https://a.com","method":"GET","status":1000}`, "status must be between 0 and 999"},
-		"status negative":      {`{"url":"https://a.com","method":"GET","status":-1}`, "status must be between 0 and 999"},
-		"status as string":     {`{"url":"https://a.com","method":"GET","status":"200"}`, "status must be a int"},
-		"non-string header":    {`{"url":"https://a.com","method":"GET","request_headers":{"accept":5}}`, "request_headers.accept must be a string"},
-		"malformed json":       {`{not json`, "record is not valid JSON"},
-		"string element":       {`"x"`, "record must be a JSON object"},
-		"number element":       {`5`, "record must be a JSON object"},
-		"ts too old":           {`{"url":"https://a.com","method":"GET","ts":"2026-09-08T11:59:59Z"}`, "ts is more than 60 days in the past"},
-		"ts too far ahead":     {`{"url":"https://a.com","method":"GET","ts":"2026-11-08T14:00:00Z"}`, "ts is more than 1 hour in the future"},
-		"ts not rfc 3339":      {`{"url":"https://a.com","method":"GET","ts":"yesterday"}`, "ts must be an RFC 3339 timestamp"},
-		"ts without time zone": {`{"url":"https://a.com","method":"GET","ts":"2026-11-08T12:00:00"}`, "ts must be an RFC 3339 timestamp"},
+		"missing url":           {`{"method":"GET"}`, "url is required"},
+		"blank url":             {`{"method":"GET","url":"  "}`, "url is required"},
+		"relative url":          {`{"method":"GET","url":"/path"}`, "url must be an absolute URL"},
+		"missing method":        {`{"url":"https://a.com"}`, "method is required"},
+		"blank method":          {`{"url":"https://a.com","method":"  "}`, "method is required"},
+		"status too high":       {`{"url":"https://a.com","method":"GET","status":1000}`, "status must be between 0 and 999"},
+		"status negative":       {`{"url":"https://a.com","method":"GET","status":-1}`, "status must be between 0 and 999"},
+		"status as string":      {`{"url":"https://a.com","method":"GET","status":"200"}`, "status must be a int"},
+		"non-string header":     {`{"url":"https://a.com","method":"GET","request_headers":{"accept":5}}`, "request_headers.accept must be a string"},
+		"malformed json":        {`{not json`, "record is not valid JSON"},
+		"string element":        {`"x"`, "record must be a JSON object"},
+		"number element":        {`5`, "record must be a JSON object"},
+		"ts too old":            {`{"url":"https://a.com","method":"GET","ts":"2026-09-08T11:59:59Z"}`, "ts is more than 60 days in the past"},
+		"ts too far ahead":      {`{"url":"https://a.com","method":"GET","ts":"2026-11-08T14:00:00Z"}`, "ts is more than 1 hour in the future"},
+		"ts not rfc 3339":       {`{"url":"https://a.com","method":"GET","ts":"yesterday"}`, "ts must be an RFC 3339 timestamp"},
+		"unknown body encoding": {`{"url":"https://a.com","method":"GET","request_body_encoding":"latin1"}`, "request_body_encoding must be utf8 or base64"},
+		"invalid base64":        {`{"url":"https://a.com","method":"GET","request_body":"not base64!","request_body_encoding":"base64"}`, "request_body is not valid base64"},
+		"url-safe base64":       {`{"url":"https://a.com","method":"GET","request_body":"_-8=","request_body_encoding":"base64"}`, "request_body is not valid base64"},
+		"utf8 body over cap":    {`{"url":"https://a.com","method":"GET","request_body":"` + strings.Repeat("a", 17) + `"}`, "request_body exceeds MAX_BODY_BYTES (16 bytes)"},
+		"base64 body over cap":  {`{"url":"https://a.com","method":"GET","request_body_encoding":"base64","request_body":"` + base64.StdEncoding.EncodeToString([]byte(strings.Repeat("a", 17))) + `"}`, "request_body exceeds MAX_BODY_BYTES (16 bytes)"},
+		"multi-byte over cap":   {`{"url":"https://a.com","method":"GET","request_body":"` + strings.Repeat("é", 9) + `"}`, "request_body exceeds MAX_BODY_BYTES (16 bytes)"},
+		"non-string body":       {`{"url":"https://a.com","method":"GET","request_body":5}`, "request_body must be a string"},
+		"ts without time zone":  {`{"url":"https://a.com","method":"GET","ts":"2026-11-08T12:00:00"}`, "ts must be an RFC 3339 timestamp"},
 	}
 	for name, test := range tests {
 		_, err := parse(test.rawRecord)
@@ -148,5 +159,32 @@ func TestParseRecordProjectComesFromArgument(t *testing.T) {
 	record, err := parse(`{"url":"https://a.com","method":"GET","project":"other"}`)
 	if err != nil || record.Project != "acme" {
 		t.Fatalf("project %q, err %v", record.Project, err)
+	}
+}
+
+func TestParseRecordRequestBody(t *testing.T) {
+	tests := map[string]struct {
+		requestBody  string
+		encoding     string
+		wantBody     string
+		wantEncoding string
+	}{
+		"default encoding":      {strings.Repeat("a", 16), "", strings.Repeat("a", 16), "utf8"},
+		"explicit utf8":         {"hello", "utf8", "hello", "utf8"},
+		"multi-byte at cap":     {strings.Repeat("é", 8), "", strings.Repeat("é", 8), "utf8"},
+		"base64 stored as sent": {base64.StdEncoding.EncodeToString([]byte(strings.Repeat("a", 16))), "base64", base64.StdEncoding.EncodeToString([]byte(strings.Repeat("a", 16))), "base64"},
+		"empty body":            {"", "", "", "utf8"},
+		"encoding without body": {"", "base64", "", "base64"},
+	}
+	for name, test := range tests {
+		rawRecord := fmt.Sprintf(`{"url":"https://a.com","method":"GET","request_body":%q,"request_body_encoding":%q}`, test.requestBody, test.encoding)
+		record, err := parse(rawRecord)
+		if err != nil {
+			t.Errorf("%s: unexpected error %v", name, err)
+			continue
+		}
+		if record.RequestBody != test.wantBody || record.RequestBodyEncoding != test.wantEncoding {
+			t.Errorf("%s: got %q/%q, want %q/%q", name, record.RequestBody, record.RequestBodyEncoding, test.wantBody, test.wantEncoding)
+		}
 	}
 }

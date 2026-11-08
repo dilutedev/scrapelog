@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,9 @@ const (
 	maxTimestampAge   = 60 * 24 * time.Hour
 	maxTimestampAhead = time.Hour
 	redactedValue     = "[REDACTED]"
+
+	bodyEncodingUTF8   = "utf8"
+	bodyEncodingBase64 = "base64"
 )
 
 type recordInput struct {
@@ -35,6 +39,9 @@ type recordInput struct {
 	ResponseSize    uint32            `json:"response_size"`
 	Error           string            `json:"error"`
 	Tags            map[string]string `json:"tags"`
+
+	RequestBody         string `json:"request_body"`
+	RequestBodyEncoding string `json:"request_body_encoding"`
 }
 
 type Record struct {
@@ -59,9 +66,12 @@ type Record struct {
 	BodyKey         string
 	Error           string
 	Tags            map[string]string
+
+	RequestBody         string
+	RequestBodyEncoding string
 }
 
-func ParseRecord(rawRecord []byte, project string, receivedAt time.Time, redactedHeaders map[string]bool) (Record, error) {
+func ParseRecord(rawRecord []byte, project string, receivedAt time.Time, redactedHeaders map[string]bool, maxBodyBytes int64) (Record, error) {
 	var input recordInput
 	if err := json.Unmarshal(rawRecord, &input); err != nil {
 		var syntaxError *json.SyntaxError
@@ -90,6 +100,11 @@ func ParseRecord(rawRecord []byte, project string, receivedAt time.Time, redacte
 	}
 	if input.Status < 0 || input.Status > 999 {
 		return Record{}, errors.New("status must be between 0 and 999")
+	}
+
+	requestBodyEncoding, err := validateRequestBody(input.RequestBody, input.RequestBodyEncoding, maxBodyBytes)
+	if err != nil {
+		return Record{}, err
 	}
 
 	timestamp := input.Timestamp
@@ -133,7 +148,32 @@ func ParseRecord(rawRecord []byte, project string, receivedAt time.Time, redacte
 		ResponseSize:    input.ResponseSize,
 		Error:           input.Error,
 		Tags:            copyMap(input.Tags),
+
+		RequestBody:         input.RequestBody,
+		RequestBodyEncoding: requestBodyEncoding,
 	}, nil
+}
+
+func validateRequestBody(requestBody string, encoding string, maxBodyBytes int64) (string, error) {
+	if encoding == "" {
+		encoding = bodyEncodingUTF8
+	}
+	bodySize := int64(len(requestBody))
+	switch encoding {
+	case bodyEncodingUTF8:
+	case bodyEncodingBase64:
+		decodedBody, err := base64.StdEncoding.DecodeString(requestBody)
+		if err != nil {
+			return "", errors.New("request_body is not valid base64")
+		}
+		bodySize = int64(len(decodedBody))
+	default:
+		return "", errors.New("request_body_encoding must be utf8 or base64")
+	}
+	if bodySize > maxBodyBytes {
+		return "", fmt.Errorf("request_body exceeds MAX_BODY_BYTES (%d bytes)", maxBodyBytes)
+	}
+	return encoding, nil
 }
 
 func stripURLCredentials(parsedURL *url.URL, original string) string {
