@@ -312,3 +312,10 @@ Revoked keys keep working for up to 35 seconds because of the key cache. The tes
 - The ingest API's direct dependencies are `clickhouse-go/v2`, `klauspost/compress` and `aws-sdk-go-v2` (`service/s3` and `credentials`).
 - `klauspost/compress` is used only to decode `Content-Encoding: zstd` request bodies, because Go's standard library has no zstd. It is already an indirect dependency of `clickhouse-go`.
 - `aws-sdk-go-v2` uploads response bodies to S3-compatible storage (Cloudflare R2, MinIO), which needs AWS Signature V4 request signing that the standard library does not provide.
+
+## Integration test
+
+- Requires Docker with Compose v5 and network access to pull and build images. It needs no `.env`.
+- Run: `cd ingest-api && go test -tags integration -count=1 -timeout 15m ./integration/`
+- It starts its own isolated stack, ingests 1000 rows, checks project isolation and key revocation, greps the logs for secrets, then removes the stack and its volumes.
+- Set `SCRAPELOG_IT_PORT` to choose the host port for the API; otherwise a free one is used. A plain `go test ./...` does not run it.
