@@ -22,6 +22,13 @@ type Config struct {
 	RateLimitRecordsPerMinute int64
 
 	ClickHouseDiskBudgetBytes int64
+
+	S3Endpoint        string
+	S3Bucket          string
+	S3AccessKeyID     string
+	S3SecretAccessKey string
+	S3Region          string
+	S3BodyPrefix      string
 }
 
 func Load() (Config, error) {
@@ -31,6 +38,13 @@ func Load() (Config, error) {
 		ClickHouseUser:     valueOrDefault("CLICKHOUSE_INGEST_USER", "ingest_writer"),
 		ClickHousePassword: os.Getenv("CLICKHOUSE_INGEST_PASSWORD"),
 		AdminToken:         os.Getenv("ADMIN_TOKEN"),
+
+		S3Endpoint:        os.Getenv("S3_ENDPOINT"),
+		S3Bucket:          os.Getenv("S3_BUCKET"),
+		S3AccessKeyID:     os.Getenv("S3_ACCESS_KEY_ID"),
+		S3SecretAccessKey: os.Getenv("S3_SECRET_ACCESS_KEY"),
+		S3Region:          valueOrDefault("S3_REGION", "auto"),
+		S3BodyPrefix:      valueOrDefault("S3_BODY_PREFIX", "bodies/"),
 	}
 	maxBatchRecords, err := positiveIntegerOrDefault("MAX_BATCH_RECORDS", 5000)
 	if err != nil {
@@ -66,6 +80,17 @@ func Load() (Config, error) {
 	}
 	if loadedConfig.AdminToken == "" {
 		return Config{}, errors.New("ADMIN_TOKEN is required")
+	}
+	if loadedConfig.S3Endpoint != "" {
+		if loadedConfig.S3Bucket == "" {
+			return Config{}, errors.New("S3_BUCKET is required when S3_ENDPOINT is set")
+		}
+		if loadedConfig.S3AccessKeyID == "" {
+			return Config{}, errors.New("S3_ACCESS_KEY_ID is required when S3_ENDPOINT is set")
+		}
+		if loadedConfig.S3SecretAccessKey == "" {
+			return Config{}, errors.New("S3_SECRET_ACCESS_KEY is required when S3_ENDPOINT is set")
+		}
 	}
 	return loadedConfig, nil
 }

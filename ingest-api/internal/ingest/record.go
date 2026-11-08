@@ -42,6 +42,9 @@ type recordInput struct {
 
 	RequestBody         string `json:"request_body"`
 	RequestBodyEncoding string `json:"request_body_encoding"`
+
+	Body         string `json:"body"`
+	BodyEncoding string `json:"body_encoding"`
 }
 
 type Record struct {
@@ -69,6 +72,10 @@ type Record struct {
 
 	RequestBody         string
 	RequestBodyEncoding string
+
+	Body           []byte
+	BodyDropReason string
+	SourceIndex    int
 }
 
 func ParseRecord(rawRecord []byte, project string, receivedAt time.Time, redactedHeaders map[string]bool, maxBodyBytes int64) (Record, error) {
@@ -103,6 +110,11 @@ func ParseRecord(rawRecord []byte, project string, receivedAt time.Time, redacte
 	}
 
 	requestBodyEncoding, err := validateRequestBody(input.RequestBody, input.RequestBodyEncoding, maxBodyBytes)
+	if err != nil {
+		return Record{}, err
+	}
+
+	responseBody, responseBodyDropReason, err := decodeResponseBody(input.Body, input.BodyEncoding, maxBodyBytes)
 	if err != nil {
 		return Record{}, err
 	}
@@ -151,6 +163,9 @@ func ParseRecord(rawRecord []byte, project string, receivedAt time.Time, redacte
 
 		RequestBody:         input.RequestBody,
 		RequestBodyEncoding: requestBodyEncoding,
+
+		Body:           responseBody,
+		BodyDropReason: responseBodyDropReason,
 	}, nil
 }
 
@@ -174,6 +189,34 @@ func validateRequestBody(requestBody string, encoding string, maxBodyBytes int64
 		return "", fmt.Errorf("request_body exceeds MAX_BODY_BYTES (%d bytes)", maxBodyBytes)
 	}
 	return encoding, nil
+}
+
+func decodeResponseBody(body string, encoding string, maxBodyBytes int64) ([]byte, string, error) {
+	if encoding == "" {
+		encoding = bodyEncodingUTF8
+	}
+	if encoding != bodyEncodingUTF8 && encoding != bodyEncodingBase64 {
+		return nil, "", errors.New("body_encoding must be utf8 or base64")
+	}
+	if body == "" {
+		return nil, "", nil
+	}
+	maxSizeReason := fmt.Sprintf("body exceeds MAX_BODY_BYTES (%d bytes)", maxBodyBytes)
+	if encoding == bodyEncodingUTF8 {
+		if int64(len(body)) > maxBodyBytes {
+			return nil, maxSizeReason, nil
+		}
+		return []byte(body), "", nil
+	}
+	decodedLength := base64.StdEncoding.DecodedLen(len(body)) - strings.Count(body[max(0, len(body)-2):], "=")
+	if int64(decodedLength) > maxBodyBytes {
+		return nil, maxSizeReason, nil
+	}
+	decodedBody, err := base64.StdEncoding.DecodeString(body)
+	if err != nil {
+		return nil, "", errors.New("body is not valid base64")
+	}
+	return decodedBody, "", nil
 }
 
 func stripURLCredentials(parsedURL *url.URL, original string) string {
