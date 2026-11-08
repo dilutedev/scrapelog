@@ -16,6 +16,7 @@ import (
 	"github.com/dilutedev/scrapelog/ingest-api/internal/apikeys"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/httpapi"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/ingest"
 )
 
 const listenAddress = ":8080"
@@ -76,11 +77,12 @@ func serve() int {
 		logger.Error("loading api keys failed", "error", err)
 		return 1
 	}
+	recordWriter := ingest.NewWriter(connection)
 	go keyCache.RunRefreshLoop(signalContext, logger)
 
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewHandler(logger, connection, keyStore, keyCache, loadedConfig.AdminToken),
+		Handler:           httpapi.NewHandler(logger, connection, keyStore, keyCache, recordWriter, loadedConfig),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

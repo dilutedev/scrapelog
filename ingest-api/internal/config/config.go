@@ -2,7 +2,10 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -11,6 +14,9 @@ type Config struct {
 	ClickHouseUser     string
 	ClickHousePassword string
 	AdminToken         string
+	MaxBatchRecords    int
+	MaxRequestBytes    int64
+	RedactedHeaders    map[string]bool
 }
 
 func Load() (Config, error) {
@@ -21,6 +27,17 @@ func Load() (Config, error) {
 		ClickHousePassword: os.Getenv("CLICKHOUSE_INGEST_PASSWORD"),
 		AdminToken:         os.Getenv("ADMIN_TOKEN"),
 	}
+	maxBatchRecords, err := positiveIntegerOrDefault("MAX_BATCH_RECORDS", 5000)
+	if err != nil {
+		return Config{}, err
+	}
+	maxRequestBytes, err := positiveIntegerOrDefault("MAX_REQUEST_BYTES", 10485760)
+	if err != nil {
+		return Config{}, err
+	}
+	loadedConfig.MaxBatchRecords = int(maxBatchRecords)
+	loadedConfig.MaxRequestBytes = maxRequestBytes
+	loadedConfig.RedactedHeaders = headerNameSet(valueOrDefault("REDACT_HEADERS", "authorization,cookie,proxy-authorization"))
 	if loadedConfig.ClickHousePassword == "" {
 		return Config{}, errors.New("CLICKHOUSE_INGEST_PASSWORD is required")
 	}
@@ -36,4 +53,27 @@ func valueOrDefault(variableName string, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+func positiveIntegerOrDefault(variableName string, defaultValue int64) (int64, error) {
+	value := os.Getenv(variableName)
+	if value == "" {
+		return defaultValue, nil
+	}
+	parsedValue, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsedValue <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", variableName)
+	}
+	return parsedValue, nil
+}
+
+func headerNameSet(commaSeparated string) map[string]bool {
+	names := map[string]bool{}
+	for _, part := range strings.Split(commaSeparated, ",") {
+		name := strings.ToLower(strings.TrimSpace(part))
+		if name != "" {
+			names[name] = true
+		}
+	}
+	return names
 }

@@ -6,19 +6,27 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 )
 
 type ClickHousePinger interface {
 	Ping(ctx context.Context) error
 }
 
-func NewHandler(logger *slog.Logger, clickHouse ClickHousePinger, keyStore KeyStore, keyRefresher KeyRefresher, adminToken string) http.Handler {
-	adminTokenHash := sha256.Sum256([]byte(adminToken))
+type KeyCache interface {
+	KeyAuthenticator
+	KeyRefresher
+}
+
+func NewHandler(logger *slog.Logger, clickHouse ClickHousePinger, keyStore KeyStore, keyCache KeyCache, recordWriter RecordWriter, loadedConfig config.Config) http.Handler {
+	adminTokenHash := sha256.Sum256([]byte(loadedConfig.AdminToken))
 	router := http.NewServeMux()
 	router.HandleFunc("GET /v1/health", healthHandler(logger, clickHouse))
-	router.HandleFunc("POST /v1/admin/keys", requireAdmin(adminTokenHash, createKeyHandler(logger, keyStore, keyRefresher)))
+	router.HandleFunc("POST /v1/admin/keys", requireAdmin(adminTokenHash, createKeyHandler(logger, keyStore, keyCache)))
 	router.HandleFunc("GET /v1/admin/keys", requireAdmin(adminTokenHash, listKeysHandler(logger, keyStore)))
-	router.HandleFunc("DELETE /v1/admin/keys/{key_id}", requireAdmin(adminTokenHash, revokeKeyHandler(logger, keyStore, keyRefresher)))
+	router.HandleFunc("DELETE /v1/admin/keys/{key_id}", requireAdmin(adminTokenHash, revokeKeyHandler(logger, keyStore, keyCache)))
+	router.HandleFunc("POST /v1/requests", requireAPIKey(keyCache, ingestRequestsHandler(logger, recordWriter, loadedConfig)))
 	return router
 }
 

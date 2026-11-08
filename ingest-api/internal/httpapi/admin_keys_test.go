@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dilutedev/scrapelog/ingest-api/internal/apikeys"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 )
 
 type fakeKeyStore struct {
@@ -49,6 +50,13 @@ func (refresher *fakeRefresher) Refresh(ctx context.Context) error {
 	return nil
 }
 
+func (refresher *fakeRefresher) Authenticate(fullKey string) (apikeys.Identity, bool) {
+	if fullKey == "good-key" {
+		return apikeys.Identity{KeyID: "goodkeyid", Project: "acme"}, true
+	}
+	return apikeys.Identity{}, false
+}
+
 func serveAdmin(store *fakeKeyStore, refresher *fakeRefresher, method string, path string, body string, authorization string) *httptest.ResponseRecorder {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -56,7 +64,7 @@ func serveAdmin(store *fakeKeyStore, refresher *fakeRefresher, method string, pa
 		request.Header.Set("Authorization", authorization)
 	}
 	recorder := httptest.NewRecorder()
-	NewHandler(logger, &fakePinger{}, store, refresher, "admin-token").ServeHTTP(recorder, request)
+	NewHandler(logger, &fakePinger{}, store, refresher, &fakeRecordWriter{}, config.Config{AdminToken: "admin-token"}).ServeHTTP(recorder, request)
 	return recorder
 }
 
