@@ -26,6 +26,28 @@ services:
       retries: 30
       start_period: 30s
 
+  ingest-api:
+    build: ./ingest-api
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:-}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-}
+      CLICKHOUSE_INGEST_USER: ${CLICKHOUSE_INGEST_USER:-}
+      CLICKHOUSE_INGEST_PASSWORD: ${CLICKHOUSE_INGEST_PASSWORD:?set CLICKHOUSE_INGEST_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${INGEST_API_PORT:-8080}:8080"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - scrapelog
+    healthcheck:
+      test: ["CMD", "/scrapelog", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
 networks:
   scrapelog: {}
 
