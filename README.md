@@ -8,6 +8,13 @@
 - The 25 GB budget on the storage gauge is set in `grafana/provisioning/dashboards/overview.json`. Keep it equal to `CLICKHOUSE_DISK_BUDGET_BYTES`, the budget the ingest API enforces.
 - Put Cloudflare Access in front of the Grafana hostname.
 
+## Request bodies
+
+- Records may carry `request_body` and `request_body_encoding` (`utf8`, the default, or `base64`). Base64 uses the standard alphabet and the size is measured after decoding.
+- A body larger than `MAX_BODY_BYTES` (default 2097152) rejects that record with an error; it is never truncated.
+- Bodies are stored verbatim and are visible to anyone with Grafana access, so scrapers must not put credentials in bodies. They are never logged.
+- The `request_body` columns exist only in a freshly initialised ClickHouse volume; recreate the volume to pick them up.
+
 ## Backups
 
 - Set `BACKUP_S3_URL` (bucket base URL ending in `/`, for example `https://<account>.r2.cloudflarestorage.com/<bucket>/`), `BACKUP_S3_ACCESS_KEY_ID` and `BACKUP_S3_SECRET_ACCESS_KEY` in `.env`, then run `docker compose up -d clickhouse` to recreate ClickHouse with them.
