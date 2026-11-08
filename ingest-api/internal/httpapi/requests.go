@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/dilutedev/scrapelog/ingest-api/internal/apikeys"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ingest"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/ratelimit"
 )
 
 const (
@@ -122,8 +125,19 @@ func decodeRecordArray(reader io.Reader, maxRecords int, eachRecord func(index i
 	return err
 }
 
-func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, loadedConfig config.Config) func(http.ResponseWriter, *http.Request, apikeys.Identity) {
+func writeRateLimited(responseWriter http.ResponseWriter, retryAfter time.Duration) {
+	retryAfterSeconds := max(1, int(math.Ceil(retryAfter.Seconds())))
+	responseWriter.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+	writeError(responseWriter, http.StatusTooManyRequests, "rate limit exceeded")
+}
+
+func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, recordLimiter *ratelimit.Limiter, loadedConfig config.Config) func(http.ResponseWriter, *http.Request, apikeys.Identity) {
 	return func(responseWriter http.ResponseWriter, request *http.Request, identity apikeys.Identity) {
+		if allowed, retryAfter := recordLimiter.HasToken(identity.KeyID); !allowed {
+			writeRateLimited(responseWriter, retryAfter)
+			return
+		}
+
 		wireLimit := newLimitedReader(request.Body, loadedConfig.MaxRequestBytes)
 		decodedLimitBytes := decodedBodyMultiplier * loadedConfig.MaxRequestBytes
 		bodyReader, closeBody, err := decodedBody(request.Header.Get("Content-Encoding"), wireLimit, decodedLimitBytes)
@@ -177,6 +191,10 @@ func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, loade
 		summary.Rejected = len(summary.Errors)
 		if len(records) == 0 {
 			writeJSON(responseWriter, http.StatusBadRequest, summary)
+			return
+		}
+		if allowed, retryAfter := recordLimiter.Take(identity.KeyID, len(records)); !allowed {
+			writeRateLimited(responseWriter, retryAfter)
 			return
 		}
 

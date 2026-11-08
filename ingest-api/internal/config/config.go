@@ -17,6 +17,8 @@ type Config struct {
 	MaxBatchRecords    int
 	MaxRequestBytes    int64
 	RedactedHeaders    map[string]bool
+
+	RateLimitRecordsPerMinute int64
 }
 
 func Load() (Config, error) {
@@ -35,7 +37,15 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	rateLimitRecordsPerMinute, err := positiveIntegerOrDefault("RATE_LIMIT_RECORDS_PER_MINUTE", 600000)
+	if err != nil {
+		return Config{}, err
+	}
+	if rateLimitRecordsPerMinute < maxBatchRecords {
+		return Config{}, errors.New("RATE_LIMIT_RECORDS_PER_MINUTE must be at least MAX_BATCH_RECORDS")
+	}
 	loadedConfig.MaxBatchRecords = int(maxBatchRecords)
+	loadedConfig.RateLimitRecordsPerMinute = rateLimitRecordsPerMinute
 	loadedConfig.MaxRequestBytes = maxRequestBytes
 	loadedConfig.RedactedHeaders = headerNameSet(valueOrDefault("REDACT_HEADERS", "authorization,cookie,proxy-authorization"))
 	if loadedConfig.ClickHousePassword == "" {

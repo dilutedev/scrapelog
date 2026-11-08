@@ -26,6 +26,8 @@ func TestLoadAppliesDefaultsWhenOnlyPasswordIsSet(t *testing.T) {
 		MaxBatchRecords:    5000,
 		MaxRequestBytes:    10485760,
 		RedactedHeaders:    map[string]bool{"authorization": true, "cookie": true, "proxy-authorization": true},
+
+		RateLimitRecordsPerMinute: 600000,
 	}
 	if !reflect.DeepEqual(loadedConfig, expectedConfig) {
 		t.Fatalf("got %+v, want %+v", loadedConfig, expectedConfig)
@@ -52,6 +54,8 @@ func TestLoadUsesProvidedValues(t *testing.T) {
 		MaxBatchRecords:    5000,
 		MaxRequestBytes:    10485760,
 		RedactedHeaders:    map[string]bool{"authorization": true, "cookie": true, "proxy-authorization": true},
+
+		RateLimitRecordsPerMinute: 600000,
 	}
 	if !reflect.DeepEqual(loadedConfig, expectedConfig) {
 		t.Fatalf("got %+v, want %+v", loadedConfig, expectedConfig)
@@ -108,5 +112,30 @@ func TestLoadParsesRedactedHeaders(t *testing.T) {
 	expected := map[string]bool{"x-api-key": true, "cookie": true}
 	if !reflect.DeepEqual(loadedConfig.RedactedHeaders, expected) {
 		t.Fatalf("got %v, want %v", loadedConfig.RedactedHeaders, expected)
+	}
+}
+
+func TestLoadRateLimitRecordsPerMinute(t *testing.T) {
+	t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
+	t.Setenv("ADMIN_TOKEN", "admin-secret")
+	t.Setenv("MAX_BATCH_RECORDS", "")
+	t.Setenv("MAX_REQUEST_BYTES", "")
+
+	t.Setenv("RATE_LIMIT_RECORDS_PER_MINUTE", "12000")
+	loadedConfig, err := Load()
+	if err != nil || loadedConfig.RateLimitRecordsPerMinute != 12000 {
+		t.Fatalf("override: got %d, %v", loadedConfig.RateLimitRecordsPerMinute, err)
+	}
+
+	t.Setenv("RATE_LIMIT_RECORDS_PER_MINUTE", "5000")
+	if _, err := Load(); err != nil {
+		t.Fatalf("value equal to MAX_BATCH_RECORDS should load: %v", err)
+	}
+
+	for _, value := range []string{"4999", "0", "-1", "abc"} {
+		t.Setenv("RATE_LIMIT_RECORDS_PER_MINUTE", value)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "RATE_LIMIT_RECORDS_PER_MINUTE") {
+			t.Errorf("value %q: expected error, got %v", value, err)
+		}
 	}
 }

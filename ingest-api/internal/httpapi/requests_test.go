@@ -11,11 +11,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
 
+	"github.com/dilutedev/scrapelog/ingest-api/internal/apikeys"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ingest"
 )
@@ -46,6 +48,8 @@ var testIngestConfig = config.Config{
 	MaxBatchRecords: 100,
 	MaxRequestBytes: 1 << 20,
 	RedactedHeaders: map[string]bool{"authorization": true},
+
+	RateLimitRecordsPerMinute: 1 << 30,
 }
 
 func serveIngest(writer *fakeRecordWriter, loadedConfig config.Config, body io.Reader, contentEncoding string) *httptest.ResponseRecorder {
@@ -58,6 +62,116 @@ func serveIngest(writer *fakeRecordWriter, loadedConfig config.Config, body io.R
 	recorder := httptest.NewRecorder()
 	NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, loadedConfig).ServeHTTP(recorder, request)
 	return recorder
+}
+
+type twoKeyRefresher struct {
+	fakeRefresher
+}
+
+func (refresher *twoKeyRefresher) Authenticate(fullKey string) (apikeys.Identity, bool) {
+	if fullKey == "other-key" {
+		return apikeys.Identity{KeyID: "otherkeyid", Project: "other"}, true
+	}
+	return refresher.fakeRefresher.Authenticate(fullKey)
+}
+
+func newRateLimitedHandler(writer *fakeRecordWriter, loadedConfig config.Config) http.Handler {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	return NewHandler(logger, &fakePinger{}, &fakeKeyStore{}, &twoKeyRefresher{}, writer, loadedConfig)
+}
+
+func serveIngestWith(handler http.Handler, apiKey string, body io.Reader) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodPost, "/v1/requests", body)
+	request.Header.Set("Authorization", "Bearer "+apiKey)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func rateLimitConfig() config.Config {
+	limitedConfig := testIngestConfig
+	limitedConfig.RateLimitRecordsPerMinute = int64(limitedConfig.MaxBatchRecords)
+	return limitedConfig
+}
+
+func requireRateLimited(t *testing.T, recorder *httptest.ResponseRecorder) {
+	t.Helper()
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("status %d, want 429, body %s", recorder.Code, recorder.Body.String())
+	}
+	retryAfterSeconds, err := strconv.Atoi(recorder.Header().Get("Retry-After"))
+	if err != nil || retryAfterSeconds < 1 {
+		t.Fatalf("Retry-After %q is not an integer >= 1", recorder.Header().Get("Retry-After"))
+	}
+}
+
+func TestIngestRateLimitFullBatchPassesOnFreshKey(t *testing.T) {
+	writer := &fakeRecordWriter{}
+	handler := newRateLimitedHandler(writer, rateLimitConfig())
+
+	recorder := serveIngestWith(handler, "good-key", strings.NewReader(recordsJSON(100)))
+	if recorder.Code != http.StatusOK || len(writer.received) != 100 {
+		t.Fatalf("status %d body %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestIngestRateLimitEmptyBucketRejectsWithoutReadingBody(t *testing.T) {
+	writer := &fakeRecordWriter{}
+	handler := newRateLimitedHandler(writer, rateLimitConfig())
+	serveIngestWith(handler, "good-key", strings.NewReader(recordsJSON(100)))
+
+	recorder := serveIngestWith(handler, "good-key", failingReader{t: t})
+	requireRateLimited(t, recorder)
+	if writer.calls != 1 {
+		t.Fatalf("writer called %d times, want 1", writer.calls)
+	}
+}
+
+func TestIngestRateLimitBatchAboveRemainingTokensIsRejectedWithoutSpending(t *testing.T) {
+	writer := &fakeRecordWriter{}
+	handler := newRateLimitedHandler(writer, rateLimitConfig())
+	serveIngestWith(handler, "good-key", strings.NewReader(recordsJSON(70)))
+
+	recorder := serveIngestWith(handler, "good-key", strings.NewReader(recordsJSON(31)))
+	requireRateLimited(t, recorder)
+	if writer.calls != 1 {
+		t.Fatalf("writer called %d times, want 1", writer.calls)
+	}
+
+	recorder = serveIngestWith(handler, "good-key", strings.NewReader(recordsJSON(30)))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("remaining tokens were spent by the rejected batch: status %d", recorder.Code)
+	}
+}
+
+func TestIngestRateLimitDoesNotChargeInvalidRecords(t *testing.T) {
+	writer := &fakeRecordWriter{}
+	handler := newRateLimitedHandler(writer, rateLimitConfig())
+
+	recorder := serveIngestWith(handler, "good-key", strings.NewReader(`[{"method":"GET"},{"method":"POST"}]`))
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", recorder.Code)
+	}
+	recorder = serveIngestWith(handler, "good-key", strings.NewReader(recordsJSON(100, 0, 1)))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", recorder.Code, recorder.Body.String())
+	}
+	recorder = serveIngestWith(handler, "good-key", strings.NewReader(recordsJSON(2)))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("2 invalid records should have cost nothing: status %d", recorder.Code)
+	}
+}
+
+func TestIngestRateLimitIsPerKey(t *testing.T) {
+	writer := &fakeRecordWriter{}
+	handler := newRateLimitedHandler(writer, rateLimitConfig())
+	serveIngestWith(handler, "good-key", strings.NewReader(recordsJSON(100)))
+	requireRateLimited(t, serveIngestWith(handler, "good-key", strings.NewReader(recordsJSON(1))))
+
+	recorder := serveIngestWith(handler, "other-key", strings.NewReader(recordsJSON(100)))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("other key status %d body %s", recorder.Code, recorder.Body.String())
+	}
 }
 
 func recordsJSON(count int, invalidIndexes ...int) string {
