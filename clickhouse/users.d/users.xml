@@ -21,6 +21,9 @@
         </grafana_reader>
     </profiles>
     <users>
+        <scrapelog_admin>
+            <named_collection_control>1</named_collection_control>
+        </scrapelog_admin>
         <ingest_writer>
             <password from_env="CLICKHOUSE_INGEST_PASSWORD"/>
             <networks>
