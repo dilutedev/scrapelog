@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
 	"log/slog"
 	"net/http"
 	"time"
@@ -11,9 +12,13 @@ type ClickHousePinger interface {
 	Ping(ctx context.Context) error
 }
 
-func NewHandler(logger *slog.Logger, clickHouse ClickHousePinger) http.Handler {
+func NewHandler(logger *slog.Logger, clickHouse ClickHousePinger, keyStore KeyStore, keyRefresher KeyRefresher, adminToken string) http.Handler {
+	adminTokenHash := sha256.Sum256([]byte(adminToken))
 	router := http.NewServeMux()
 	router.HandleFunc("GET /v1/health", healthHandler(logger, clickHouse))
+	router.HandleFunc("POST /v1/admin/keys", requireAdmin(adminTokenHash, createKeyHandler(logger, keyStore, keyRefresher)))
+	router.HandleFunc("GET /v1/admin/keys", requireAdmin(adminTokenHash, listKeysHandler(logger, keyStore)))
+	router.HandleFunc("DELETE /v1/admin/keys/{key_id}", requireAdmin(adminTokenHash, revokeKeyHandler(logger, keyStore, keyRefresher)))
 	return router
 }
 

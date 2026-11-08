@@ -13,6 +13,7 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 
+	"github.com/dilutedev/scrapelog/ingest-api/internal/apikeys"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/httpapi"
 )
@@ -61,14 +62,25 @@ func serve() int {
 	}
 	defer connection.Close()
 
-	server := &http.Server{
-		Addr:              listenAddress,
-		Handler:           httpapi.NewHandler(logger, connection),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-
 	signalContext, stopSignalHandling := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignalHandling()
+
+	keyStore := apikeys.NewStore(connection)
+	keyCache := apikeys.NewCache(keyStore)
+	startupContext, cancelStartup := context.WithTimeout(signalContext, 10*time.Second)
+	err = keyCache.Refresh(startupContext)
+	cancelStartup()
+	if err != nil {
+		logger.Error("loading api keys failed", "error", err)
+		return 1
+	}
+	go keyCache.RunRefreshLoop(signalContext, logger)
+
+	server := &http.Server{
+		Addr:              listenAddress,
+		Handler:           httpapi.NewHandler(logger, connection, keyStore, keyCache, loadedConfig.AdminToken),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
 	serverErrors := make(chan error, 1)
 	go func() {

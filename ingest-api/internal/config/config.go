@@ -10,6 +10,7 @@ type Config struct {
 	ClickHouseDatabase string
 	ClickHouseUser     string
 	ClickHousePassword string
+	AdminToken         string
 }
 
 func Load() (Config, error) {
@@ -18,9 +19,13 @@ func Load() (Config, error) {
 		ClickHouseDatabase: valueOrDefault("CLICKHOUSE_DATABASE", "scrapelog"),
 		ClickHouseUser:     valueOrDefault("CLICKHOUSE_INGEST_USER", "ingest_writer"),
 		ClickHousePassword: os.Getenv("CLICKHOUSE_INGEST_PASSWORD"),
+		AdminToken:         os.Getenv("ADMIN_TOKEN"),
 	}
 	if loadedConfig.ClickHousePassword == "" {
 		return Config{}, errors.New("CLICKHOUSE_INGEST_PASSWORD is required")
+	}
+	if loadedConfig.AdminToken == "" {
+		return Config{}, errors.New("ADMIN_TOKEN is required")
 	}
 	return loadedConfig, nil
 }
