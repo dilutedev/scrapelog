@@ -31,9 +31,11 @@ func run(arguments []string) int {
 			return serve()
 		case "healthcheck":
 			return healthcheck()
+		case "keys":
+			return keys(arguments[1:])
 		}
 	}
-	fmt.Fprintln(os.Stderr, "usage: scrapelog serve|healthcheck")
+	fmt.Fprintln(os.Stderr, "usage: scrapelog serve|healthcheck|keys")
 	return 2
 }
 
