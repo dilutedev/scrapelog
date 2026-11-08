@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>scrapelog ingest API</title>
+<style>
+body { font-family: system-ui, sans-serif; max-width: 980px; margin: 2rem auto; padding: 0 1rem 4rem; line-height: 1.55; color: #1f2328; }
+code, pre { font-family: ui-monospace, monospace; font-size: 0.88em; }
+code { background: #eff1f3; padding: 0.1em 0.3em; border-radius: 4px; }
+pre { background: #f6f8fa; padding: 1rem; overflow-x: auto; border-radius: 6px; border: 1px solid #d0d7de; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.95em; }
+th, td { border: 1px solid #d0d7de; padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
+th { background: #f6f8fa; }
+h2 { border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; margin-top: 3rem; }
+h3 { margin-top: 2rem; }
+.rule { border-left: 4px solid #0969da; background: #ddf4ff; padding: 0.6rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+.warning { border-left: 4px solid #bf8700; background: #fff8c5; padding: 0.6rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+nav ol { columns: 2; }
+</style>
+</head>
+<body>
+<h1>scrapelog ingest API</h1>
+<p>This API stores one record for every HTTP request your scraper makes: the URL, the status, the latency, the proxy, the error and so on. The operator views the records in dashboards. This page tells you everything you need to send records correctly. Every limit on this page is read from the running server, so it is always current.</p>
+
+<table>
+<tr><th>Base URL</th><td><code>{{.BaseURL}}</code></td></tr>
+<tr><th>Format</th><td>JSON (UTF-8). Batch requests send a JSON array; stream requests send one JSON object per line.</td></tr>
+<tr><th>Authentication</th><td><code>Authorization: Bearer &lt;your ingest key&gt;</code> on every request except <code>/v1/health</code> and <code>/docs</code>.</td></tr>
+<tr><th>Endpoint to use</th><td><code>POST {{.BaseURL}}/v1/requests</code> unless you have a reason to stream.</td></tr>
+</table>
+
+<nav>
+<h2>Contents</h2>
+<ol>
+<li><a href="#key">Your ingest key</a></li>
+<li><a href="#first">Send your first record</a></li>
+<li><a href="#what">What to send</a></li>
+<li><a href="#fields">Record fields</a></li>
+<li><a href="#full">A complete record</a></li>
+<li><a href="#batch">Batch endpoint</a></li>
+<li><a href="#stream">Stream endpoint</a></li>
+<li><a href="#summary">The response summary</a></li>
+<li><a href="#status">Status codes</a></li>
+<li><a href="#limits">Limits</a></li>
+<li><a href="#ratelimit">Rate limit</a></li>
+<li><a href="#retries">Retries and duplicates</a></li>
+<li><a href="#privacy">Redaction and privacy</a></li>
+<li><a href="#bodies">Request and response bodies</a></li>
+<li><a href="#retention">Retention</a></li>
+<li><a href="#stats">Check what is stored</a></li>
+<li><a href="#errors">Error messages and fixes</a></li>
+<li><a href="#examples">Client examples</a></li>
+</ol>
+</nav>
+
+<h2 id="key">1. Your ingest key</h2>
+<ul>
+<li>The operator creates the key and gives it to you. You cannot create keys yourself.</li>
+<li>A key looks like <code>sl_</code> + 12 characters + <code>_</code> + 43 characters, for example <code>sl_AbCdEf123456_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</code>. Send the whole string.</li>
+<li>A key belongs to exactly one project. Every record you send is stored under that project. You do not send a project name, and if you put a <code>project</code> field in a record it is ignored.</li>
+<li>Treat the key as a password. Load it from an environment variable or a secret store and never commit it. If it leaks, ask the operator to revoke it and issue a new one. A revoked key stops working within 35 seconds.</li>
+<li>One key per scraper is a good default, because the <a href="#ratelimit">rate limit</a> is counted per key.</li>
+</ul>
+<p>All examples on this page read the key and base URL from these variables:</p>
+<pre><code>export SCRAPELOG_URL={{.BaseURL}}
+export SCRAPELOG_KEY=sl_...</code></pre>
+<div class="warning">Send a <code>User-Agent</code> header naming your client, for example <code>User-Agent: scrapelog-client/1.0</code>. The proxy in front of this API may block some library defaults: Python's built-in <code>urllib</code> (<code>Python-urllib/3.x</code>) is answered with <code>403 error code: 1010</code> before the request reaches the API.</div>
+<p>The header is exactly <code>Authorization: Bearer </code> followed by the key, with one space and the word <code>Bearer</code> capitalised as shown. A missing, malformed, unknown or revoked key gets:</p>
+<pre><code>HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer
+
+{"error":"unauthorized"}</code></pre>
+
+<h2 id="first">2. Send your first record</h2>
+<pre><code>curl -sS -X POST "$SCRAPELOG_URL/v1/requests" \
+  -H "Authorization: Bearer $SCRAPELOG_KEY" \
+  -H "Content-Type: application/json" \
+  -d '[{"url": "https://example.com/products?page=2", "method": "GET", "status": 200, "latency_ms": 412}]'</code></pre>
+<p>Expected response, status 200:</p>
+<pre><code>{"accepted":1,"rejected":0,"errors":[],"warnings":[]}</code></pre>
+<p>Then confirm it was stored:</p>
+<pre><code>curl -sS -H "Authorization: Bearer $SCRAPELOG_KEY" "$SCRAPELOG_URL/v1/stats"</code></pre>
+<p><code>row_count</code> goes up by one. If it does, your setup is correct.</p>
+
+<h2 id="what">3. What to send</h2>
+<div class="rule">Send <strong>one record for every HTTP request attempt</strong> your scraper makes, including attempts that failed.</div>
+<ul>
+<li><strong>Successful response</strong> (any status, including 4xx and 5xx): set <code>status</code> to the response status code.</li>
+<li><strong>No response</strong> (timeout, DNS failure, connection refused, TLS error, proxy error): set <code>status</code> to <code>0</code> and put the error text in <code>error</code>.</li>
+<li><strong>Retries inside your scraper</strong>: each attempt is its own record with its own <code>request_id</code>. Use <code>tags</code> (for example <code>{"attempt": "2"}</code>) if you want to link attempts.</li>
+<li>A record counts as an error in the dashboards when <code>status</code> is <code>0</code> <strong>or</strong> <code>error</code> is not empty. So a 403 with an empty <code>error</code> is not an error; a 200 with <code>"error": "captcha page"</code> is.</li>
+<li>Collect records in memory and send them in batches (for example every 1 to 5 seconds, or every 500 to {{.MaxBatchRecords}} records). Do not make one API call per record.</li>
+</ul>
+
+<h2 id="fields">4. Record fields</h2>
+<p>A record is a JSON object. Only <code>url</code> and <code>method</code> are required. Rules that apply to every field:</p>
+<ul>
+<li>Fields not listed below are <strong>ignored</strong>, not rejected. Check spelling: a misspelled field such as <code>latency</code> is silently dropped.</li>
+<li>A field that is missing or <code>null</code> gets its default. An empty string also gets the default, except for <code>ts</code>: <code>"ts": ""</code> is rejected, so leave <code>ts</code> out instead.</li>
+<li>Types are strict. <code>"status": "200"</code> (a string) is rejected; send <code>"status": 200</code>. Strings are never converted to numbers and numbers are never converted to strings.</li>
+<li>If a record breaks any rule below, that record is rejected and the others in the request are still stored. See <a href="#summary">the response summary</a>.</li>
+</ul>
+
+<table>
+<tr><th>Field</th><th>Type</th><th>Required</th><th>If missing</th><th>Rules and what is stored</th></tr>
+<tr><td><code>url</code></td><td>string</td><td><strong>yes</strong></td><td>record rejected: <code>url is required</code></td><td>Must be absolute, with a scheme and a host (<code>https://example.com/path?q=1</code>). A relative URL is rejected. A username and password in the URL (<code>https://user:pass@host/</code>) are removed before storing. The query string is stored as is.</td></tr>
+<tr><td><code>method</code></td><td>string</td><td><strong>yes</strong></td><td>record rejected: <code>method is required</code></td><td>Stored exactly as sent. Send it in upper case (<code>GET</code>, <code>POST</code>) so dashboard filters group it correctly.</td></tr>
+<tr><td><code>ts</code></td><td>string, RFC 3339</td><td>no</td><td>time the API received the record</td><td>When the request was made. Must include a timezone: <code>2026-11-08T14:03:07.123Z</code> or <code>2026-11-08T15:03:07+01:00</code>. <code>2026-11-08T14:03:07</code> (no zone) and Unix numbers are rejected. Must be no more than {{.MaxTimestampAgeDays}} days in the past and no more than {{.MaxTimestampAheadHour}} hour in the future. Stored in UTC with millisecond precision.</td></tr>
+<tr><td><code>status</code></td><td>integer</td><td>no</td><td><code>0</code></td><td>HTTP status code, 0 to 999. <code>0</code> means no response was received. Omitting it therefore marks the record as an error.</td></tr>
+<tr><td><code>latency_ms</code></td><td>integer</td><td>no</td><td><code>0</code></td><td>Milliseconds from sending the request to receiving the full response (or to the failure). 0 to 4294967295. Must be a whole number; <code>412.5</code> and negative numbers are rejected.</td></tr>
+<tr><td><code>scraper</code></td><td>string</td><td>no</td><td>empty</td><td>Name of the scraper. Dashboards filter by it, so keep it stable and short, for example <code>products</code> or <code>search-api</code>.</td></tr>
+<tr><td><code>request_id</code></td><td>string</td><td>no</td><td>a new UUIDv7</td><td>Your id for this request attempt. Use only <code>A-Z a-z 0-9 . _ -</code> and keep it under 200 characters. <strong>Set it yourself</strong> so retries can be recognised; see <a href="#retries">retries</a>.</td></tr>
+<tr><td><code>domain</code></td><td>string</td><td>no</td><td>host of <code>url</code></td><td>Stored in lower case. Leave it out unless you want to group differently from the URL's host.</td></tr>
+<tr><td><code>proxy</code></td><td>string</td><td>no</td><td>empty</td><td>The proxy used, for example <code>http://user:pass@proxy.example.net:8000</code>. The username and password are removed before storing, so this becomes <code>http://proxy.example.net:8000</code>. Dashboards group by this value.</td></tr>
+<tr><td><code>http_version</code></td><td>string</td><td>no</td><td>empty</td><td>For example <code>HTTP/1.1</code>, <code>HTTP/2</code>, <code>HTTP/3</code>. Stored as sent.</td></tr>
+<tr><td><code>tls_ja3</code>, <code>tls_ja4</code></td><td>string</td><td>no</td><td>empty</td><td>TLS fingerprints of your client. Stored as sent.</td></tr>
+<tr><td><code>tls_profile</code></td><td>string</td><td>no</td><td>empty</td><td>Name of your client or impersonation profile, for example <code>chrome_131</code>. Dashboards group by it.</td></tr>
+<tr><td><code>request_headers</code></td><td>object of string to string</td><td>no</td><td>empty</td><td>Headers you sent. Every value must be a string: <code>{"accept": "text/html"}</code>. For a header sent more than once, join the values into one string. Values of <a href="#privacy">redacted headers</a> are replaced with <code>[REDACTED]</code>.</td></tr>
+<tr><td><code>response_headers</code></td><td>object of string to string</td><td>no</td><td>empty</td><td>Headers you received. Same rules as <code>request_headers</code>.</td></tr>
+<tr><td><code>response_size</code></td><td>integer</td><td>no</td><td><code>0</code></td><td>Response size in bytes, 0 to 4294967295.</td></tr>
+<tr><td><code>error</code></td><td>string</td><td>no</td><td>empty</td><td>Error text. Any non-empty value marks the record as an error. Send a short, stable message (<code>timeout</code>, <code>connection reset</code>, <code>captcha</code>) rather than a full stack trace.</td></tr>
+<tr><td><code>tags</code></td><td>object of string to string</td><td>no</td><td>empty</td><td>Your own labels, for example <code>{"run": "2026-11-08-nightly", "attempt": "2"}</code>. Every value must be a string; <code>{"attempt": 2}</code> is rejected.</td></tr>
+<tr><td><code>request_body</code></td><td>string</td><td>no</td><td>empty</td><td>The body your scraper sent. See <a href="#bodies">bodies</a>.</td></tr>
+<tr><td><code>request_body_encoding</code></td><td>string</td><td>no</td><td><code>utf8</code></td><td><code>utf8</code> or <code>base64</code> (standard alphabet, with padding). Anything else is rejected.</td></tr>
+<tr><td><code>body</code></td><td>string</td><td>no</td><td>empty</td><td>The response body you received. See <a href="#bodies">bodies</a>.</td></tr>
+<tr><td><code>body_encoding</code></td><td>string</td><td>no</td><td><code>utf8</code></td><td><code>utf8</code> or <code>base64</code> (standard alphabet, with padding). Use <code>base64</code> for binary or non-UTF-8 content. Anything else is rejected.</td></tr>
+</table>
+
+<h2 id="full">5. A complete record</h2>
+<p>Every field filled in. In practice most scrapers send <code>url</code>, <code>method</code>, <code>ts</code>, <code>status</code>, <code>latency_ms</code>, <code>scraper</code>, <code>request_id</code>, <code>proxy</code> and <code>error</code>.</p>
+<pre><code>{
+  "url": "https://shop.example.com/api/products?page=2",
+  "method": "GET",
+  "ts": "2026-11-08T14:03:07.123Z",
+  "status": 200,
+  "latency_ms": 412,
+  "scraper": "products",
+  "request_id": "products-20261108-000001",
+  "proxy": "http://user:pass@proxy.example.net:8000",
+  "http_version": "HTTP/2",
+  "tls_ja3": "771,4865-4866-4867,0-23-65281,29-23-24,0",
+  "tls_ja4": "t13d1516h2_8daaf6152771_02713d6af862",
+  "tls_profile": "chrome_131",
+  "request_headers": {"accept": "application/json", "user-agent": "Mozilla/5.0"},
+  "response_headers": {"content-type": "application/json", "cf-cache-status": "MISS"},
+  "response_size": 18342,
+  "error": "",
+  "tags": {"run": "2026-11-08-nightly", "attempt": "1"},
+  "request_body": "",
+  "request_body_encoding": "utf8",
+  "body": "{\"products\": []}",
+  "body_encoding": "utf8"
+}</code></pre>
+<p>A request that got no response:</p>
+<pre><code>{"url": "https://shop.example.com/api/products?page=3", "method": "GET", "ts": "2026-11-08T14:03:09.870Z",
+ "status": 0, "latency_ms": 30000, "scraper": "products", "request_id": "products-20261108-000002",
+ "error": "timeout"}</code></pre>
+
+<h2 id="batch">6. Batch endpoint: <code>POST /v1/requests</code></h2>
+<p>The default way to send records.</p>
+<table>
+<tr><th>URL</th><td><code>POST {{.BaseURL}}/v1/requests</code></td></tr>
+<tr><th>Headers</th><td><code>Authorization: Bearer &lt;key&gt;</code> (required)<br><code>Content-Type: application/json</code> (recommended)<br><code>Content-Encoding: gzip</code> or <code>zstd</code> (optional, see <a href="#limits">limits</a>)</td></tr>
+<tr><th>Body</th><td>A JSON array of record objects: <code>[{...}, {...}]</code>. Always an array, even for one record.</td></tr>
+<tr><th>Max records</th><td>{{.MaxBatchRecords}} per request</td></tr>
+<tr><th>Max size</th><td>{{.MaxRequestBytes}} bytes ({{mebibytes .MaxRequestBytes}} MiB) as sent; {{.MaxDecodedBytes}} bytes ({{mebibytes .MaxDecodedBytes}} MiB) after decompression</td></tr>
+<tr><th>Response</th><td>A <a href="#summary">summary</a> object</td></tr>
+</table>
+
+<h3>What happens to a batch</h3>
+<p>A batch fails as a whole, with <strong>nothing stored</strong>, in these cases:</p>
+<ul>
+<li>The body is not valid JSON anywhere in it, including one malformed element (<code>[{"url": ...}, {bad json}]</code>). Response: 400 <code>{"error":"invalid request body"}</code>.</li>
+<li>The body is a JSON object instead of an array. Response: 400 <code>{"error":"body must be a JSON array of records; wrap a single record in [ ]"}</code>.</li>
+<li>It has more than {{.MaxBatchRecords}} records, or is too large (413); uses an unsupported <code>Content-Encoding</code> (415); has an invalid gzip body (400).</li>
+<li>The key is missing or invalid (401), the <a href="#ratelimit">rate limit</a> is reached (429), or the server's storage budget is full (507).</li>
+</ul>
+<p>Otherwise each record is checked on its own:</p>
+<ul>
+<li>Valid records are stored. Invalid records are rejected and listed in <code>errors</code> with their position in your array.</li>
+<li>If at least one record was stored: status <strong>200</strong>.</li>
+<li>If no record was stored (every record invalid, or the array was empty <code>[]</code>): status <strong>400</strong>, still with a summary body.</li>
+</ul>
+<div class="rule">A 200 does not mean every record was stored. Always check <code>rejected</code> and <code>errors</code>.</div>
+
+<h2 id="stream">7. Stream endpoint: <code>POST /v1/requests/stream</code></h2>
+<p>Use this only if your scraper produces a continuous flow of records and you want to send them over one long request instead of many batches. If unsure, use the batch endpoint.</p>
+<table>
+<tr><th>URL</th><td><code>POST {{.BaseURL}}/v1/requests/stream</code></td></tr>
+<tr><th>Headers</th><td><code>Authorization: Bearer &lt;key&gt;</code> (required)<br><code>Content-Type: application/x-ndjson</code> (recommended)<br><code>Transfer-Encoding: chunked</code> (so you can write while sending)<br><code>Content-Encoding: gzip</code> or <code>zstd</code> (optional)</td></tr>
+<tr><th>Body</th><td>Newline-delimited JSON: one record object per line, each line ending in <code>\n</code>. No surrounding array, no commas between lines.</td></tr>
+<tr><th>Max line size</th><td>{{.MaxRequestBytes}} bytes per line. There is no limit on the number of lines.</td></tr>
+<tr><th>Duration</th><td>End each stream and start a new one at least every <strong>60 seconds</strong>. Proxies in front of this API close requests after about 100 seconds; a closed stream loses its summary.</td></tr>
+<tr><th>Response</th><td>A <a href="#summary">summary</a> object, sent once, after you end the request body</td></tr>
+</table>
+<pre><code>{"url":"https://example.com/a","method":"GET","status":200,"latency_ms":120}
+{"url":"https://example.com/b","method":"GET","status":0,"error":"timeout","latency_ms":30000}
+</code></pre>
+
+<h3>How the stream differs from a batch</h3>
+<ul>
+<li>Records are stored while the stream is open, in groups: every {{.StreamFlushLines}} lines or every {{.StreamFlushSeconds}} seconds, whichever comes first.</li>
+<li>A line that is not valid JSON rejects only that line (<code>record is not valid JSON</code>); the stream continues.</li>
+<li>Empty lines are skipped and do not count.</li>
+<li><code>index</code> in <code>errors</code> and <code>warnings</code> is the line number, starting at 0 and counting only non-empty lines.</li>
+<li>The <code>errors</code> and <code>warnings</code> lists hold at most {{.MaxBatchRecords}} entries each; <code>rejected</code> is always the full count.</li>
+<li>If storing a group fails (rate limit, storage budget, server error), the stream stops. The response has the failure's status code, an <code>error</code> field, and a summary of everything stored <strong>before</strong> the failure.</li>
+</ul>
+<div class="rule">After a stream fails, lines <code>0</code> to <code>accepted + rejected - 1</code> are finished (stored or rejected). Resend from line <code>accepted + rejected</code> onward.</div>
+<pre><code>HTTP/1.1 429 Too Many Requests
+Retry-After: 3
+
+{"accepted":4000,"rejected":0,"errors":[],"warnings":[],"error":"rate limit exceeded"}</code></pre>
+<p>Here lines 0 to 3999 are stored. Wait 3 seconds and resend from line 4000.</p>
+
+<h2 id="summary">8. The response summary</h2>
+<p>Both ingest endpoints answer with this object (status 200, or 400 when nothing was accepted):</p>
+<pre><code>{
+  "accepted": 998,
+  "rejected": 2,
+  "errors": [
+    {"index": 4, "error": "url is required"},
+    {"index": 9, "error": "status must be a int"}
+  ],
+  "warnings": [
+    {"index": 7, "warning": "body upload failed"}
+  ]
+}</code></pre>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><code>accepted</code></td><td>Number of records stored.</td></tr>
+<tr><td><code>rejected</code></td><td>Number of records not stored because they were invalid. <code>accepted + rejected</code> equals the number of records you sent.</td></tr>
+<tr><td><code>errors</code></td><td>One entry per rejected record. <code>index</code> is the record's position in your array (batch) or its line number (stream), starting at 0. <code>error</code> says what is wrong. Rejected records are not stored; fix them before resending, or drop them.</td></tr>
+<tr><td><code>warnings</code></td><td>One entry per record that <strong>was stored</strong> but whose response <code>body</code> was not. Do not resend these records. See <a href="#bodies">bodies</a>.</td></tr>
+<tr><td><code>error</code></td><td>Stream only, present only when the stream stopped early. Why it stopped.</td></tr>
+</table>
+<p>Every other error response is <code>{"error": "&lt;message&gt;"}</code>.</p>
+
+<h2 id="status">9. Status codes</h2>
+<table>
+<tr><th>Status</th><th>Meaning</th><th>Was anything stored?</th><th>What to do</th></tr>
+<tr><td>200</td><td>At least one record stored.</td><td>Yes: <code>accepted</code> records.</td><td>Done. Log <code>errors</code> so you can fix your scraper. Do not resend.</td></tr>
+<tr><td>400</td><td>No record stored: every record invalid, empty array, body not a JSON array, malformed JSON, or invalid gzip.</td><td>Batch: no. Stream: lines before the failure, see <code>accepted</code>.</td><td>Fix the request. Do not retry it unchanged; it will fail the same way.</td></tr>
+<tr><td>401</td><td>Missing, malformed, unknown or revoked key.</td><td>No.</td><td>Check <code>SCRAPELOG_KEY</code> and the <code>Authorization</code> header. Ask the operator if the key was revoked.</td></tr>
+<tr><td>413</td><td>More than {{.MaxBatchRecords}} records, request over {{.MaxRequestBytes}} bytes, decompressed over {{.MaxDecodedBytes}} bytes, or a stream line over {{.MaxRequestBytes}} bytes.</td><td>Batch: no. Stream: lines before the failure.</td><td>Split into smaller batches and resend. Do not retry unchanged.</td></tr>
+<tr><td>415</td><td>Unsupported <code>Content-Encoding</code>.</td><td>No.</td><td>Use <code>gzip</code>, <code>zstd</code>, or no <code>Content-Encoding</code> header.</td></tr>
+<tr><td>429</td><td>Rate limit for this key reached.</td><td>Batch: no. Stream: lines before the failure.</td><td>Wait the number of seconds in the <code>Retry-After</code> header, then resend.</td></tr>
+<tr><td>503</td><td>Database unavailable, a write timed out, or the server is restarting.</td><td>Batch: <strong>unknown</strong>, some or all records may be stored. Stream: at least the lines counted in <code>accepted</code>.</td><td>Wait <code>Retry-After</code> seconds (usually {{.InsertRetryAfter}}), then resend with the <strong>same</strong> <code>request_id</code> values. See <a href="#retries">retries</a>.</td></tr>
+<tr><td>507</td><td>The server's storage budget is full.</td><td>No.</td><td>Tell the operator. Retrying will not help until they free space.</td></tr>
+<tr><td>502, 504, 520-524, connection errors</td><td>The proxy in front of the API could not reach it, or the connection broke.</td><td>Unknown.</td><td>Treat like 503: wait a few seconds and resend with the same <code>request_id</code> values.</td></tr>
+</table>
+
+<h2 id="limits">10. Limits</h2>
+<table>
+<tr><th>Limit</th><th>Value</th><th>When exceeded</th></tr>
+<tr><td>Records per batch</td><td>{{.MaxBatchRecords}}</td><td>413, nothing stored</td></tr>
+<tr><td>Batch request size as sent</td><td>{{.MaxRequestBytes}} bytes ({{mebibytes .MaxRequestBytes}} MiB)</td><td>413, nothing stored</td></tr>
+<tr><td>Batch request size after decompression</td><td>{{.MaxDecodedBytes}} bytes ({{mebibytes .MaxDecodedBytes}} MiB)</td><td>413, nothing stored</td></tr>
+<tr><td>Stream line size</td><td>{{.MaxRequestBytes}} bytes</td><td>413, stream stops</td></tr>
+<tr><td><code>request_body</code> size (after base64 decoding)</td><td>{{.MaxBodyBytes}} bytes ({{mebibytes .MaxBodyBytes}} MiB)</td><td>Record rejected</td></tr>
+<tr><td><code>body</code> size (after base64 decoding)</td><td>{{.MaxBodyBytes}} bytes ({{mebibytes .MaxBodyBytes}} MiB)</td><td>Record stored, body dropped, warning</td></tr>
+<tr><td>Records per key</td><td>{{.RecordsPerMinute}} per minute (about {{.RecordsPerSecond}} per second)</td><td>429, see <a href="#ratelimit">rate limit</a></td></tr>
+<tr><td><code>ts</code> age</td><td>{{.MaxTimestampAgeDays}} days in the past to {{.MaxTimestampAheadHour}} hour in the future</td><td>Record rejected</td></tr>
+</table>
+<p>Compression: send <code>Content-Encoding: gzip</code> or <code>Content-Encoding: zstd</code> with a body compressed in that format. The size limit as sent applies to the compressed bytes. Records compress well (often 10 times), so compression lets you send full {{.MaxBatchRecords}}-record batches.</p>
+
+<h2 id="ratelimit">11. Rate limit</h2>
+<ul>
+<li>Each key has a budget of {{.RecordsPerMinute}} records. It refills continuously at {{.RecordsPerSecond}} records per second, up to the full budget.</li>
+<li>A batch takes as many records from the budget as it has valid records. If the budget is too small for the whole batch, the batch gets 429 and <strong>nothing is stored</strong>; it is never partly stored because of the rate limit.</li>
+<li><code>Retry-After</code> is the number of whole seconds until the budget is large enough for that batch. Wait at least that long before resending.</li>
+<li>The limit is per key. Separate keys for separate scrapers do not slow each other down.</li>
+</ul>
+
+<h2 id="retries">12. Retries and duplicates</h2>
+<div class="warning">The API does <strong>not</strong> remove duplicates. If you send the same record twice, it is stored twice, even with the same <code>request_id</code>.</div>
+<p>Retry rules:</p>
+<ol>
+<li>Set <code>request_id</code> on every record <strong>before</strong> the first attempt, and keep the same value on every retry. Then any duplicates share a <code>request_id</code> and can be told apart from real repeat requests.</li>
+<li>Retry only on 429, 503, 502, 504, 520-524 and network errors. Never retry 400, 401, 413 or 415 unchanged.</li>
+<li>Wait <code>Retry-After</code> seconds when the header is present; otherwise back off (for example 1, 2, 4, 8, 16 seconds).</li>
+<li>Give up after about 5 attempts and log the failure. Your scraper should keep working even if this API is down: do not block scraping on delivery.</li>
+<li>On a 200, never resend, even if some records were rejected. Resending would duplicate the accepted ones.</li>
+</ol>
+
+<h2 id="privacy">13. Redaction and privacy</h2>
+<ul>
+<li>These header names are redacted in both <code>request_headers</code> and <code>response_headers</code>, matched case-insensitively. Their values are stored as <code>[REDACTED]</code>:
+<ul>{{range .RedactedHeaders}}<li><code>{{.}}</code></li>{{else}}<li>none</li>{{end}}</ul></li>
+<li>A username and password in <code>url</code> or <code>proxy</code> are removed.</li>
+<li><strong>Nothing else is redacted.</strong> Query strings, <code>tags</code>, <code>error</code>, request bodies, response bodies and all other headers are stored exactly as sent, and anyone with dashboard access can read them.</li>
+<li>Do not send API tokens, session tokens, passwords or personal data in URLs, tags, bodies or non-redacted headers. Remove them in your scraper before sending.</li>
+</ul>
+
+<h2 id="bodies">14. Request and response bodies</h2>
+<h3><code>request_body</code>: what your scraper sent</h3>
+<ul>
+<li>Stored in the database and shown in the dashboards' request explorer.</li>
+<li>Over {{.MaxBodyBytes}} bytes (measured after base64 decoding) rejects the <strong>whole record</strong> with <code>request_body exceeds MAX_BODY_BYTES ({{.MaxBodyBytes}} bytes)</code>. Bodies are never cut short. Drop or shorten the body yourself if it may be large.</li>
+</ul>
+<h3><code>body</code>: the response you received</h3>
+<ul>
+{{if .BodyStorageEnabled}}<li><strong>Response bodies are stored on this server.</strong> Each body is compressed and kept in object storage, linked to its record.</li>
+{{else}}<li><strong>Response bodies are not stored on this server right now.</strong> Records with a <code>body</code> are stored without it and get the warning <code>body dropped: S3 is not configured</code>. Leave <code>body</code> out to save bandwidth unless the operator tells you otherwise.</li>
+{{end}}<li>A body that cannot be stored never rejects its record. The record is stored and a <code>warnings</code> entry says why the body is missing: <code>body dropped: S3 is not configured</code>, <code>body upload failed</code>, <code>body upload timed out</code>, or <code>body exceeds MAX_BODY_BYTES ({{.MaxBodyBytes}} bytes)</code>. Do not resend those records.</li>
+<li>An invalid <code>body_encoding</code> or invalid base64 does reject the record.</li>
+<li>Set a short <code>request_id</code> (only <code>A-Z a-z 0-9 . _ -</code>) on records with a body. It names the stored body file, and other characters are replaced with <code>_</code>, so two different ids could end up sharing a file.</li>
+</ul>
+
+<h2 id="retention">15. Retention</h2>
+<ul>
+<li>Records with <code>status</code> 200 to 399 are deleted <strong>14 days</strong> after their <code>ts</code>.</li>
+<li>All other records (errors, 4xx, 5xx, status 0) are deleted <strong>60 days</strong> after their <code>ts</code>.</li>
+<li>Hourly totals in the dashboards are kept after the individual records are deleted.</li>
+<li>The operator can change these periods.</li>
+</ul>
+
+<h2 id="stats">16. Check what is stored: <code>GET /v1/stats</code></h2>
+<pre><code>curl -sS -H "Authorization: Bearer $SCRAPELOG_KEY" "$SCRAPELOG_URL/v1/stats"</code></pre>
+<pre><code>{"project":"my-project","row_count":2,"oldest_ts":"2026-11-08T19:52:25.003Z","newest_ts":"2026-11-08T19:52:25.083Z","estimated_bytes_on_disk":11162}</code></pre>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><code>project</code></td><td>The project your key belongs to.</td></tr>
+<tr><td><code>row_count</code></td><td>Records currently stored for the project, across all its keys.</td></tr>
+<tr><td><code>oldest_ts</code>, <code>newest_ts</code></td><td>Smallest and largest <code>ts</code> stored, in UTC. <code>null</code> when the project has no records.</td></tr>
+<tr><td><code>estimated_bytes_on_disk</code></td><td>Approximate compressed storage used by the project.</td></tr>
+</table>
+<p>Records are written before the 200 response is sent, so they are already counted in <code>row_count</code> when you receive it.</p>
+<p><code>GET {{.BaseURL}}/v1/health</code> needs no key. It returns 200 <code>{"status":"ok"}</code> when the API can reach its database and 503 otherwise. Use it for uptime checks, not before every batch.</p>
+
+<h2 id="errors">17. Error messages and fixes</h2>
+<table>
+<tr><th>Message</th><th>Cause</th><th>Fix</th></tr>
+<tr><td><code>unauthorized</code></td><td>Header missing, not <code>Bearer &lt;key&gt;</code>, or key unknown or revoked.</td><td>Send <code>Authorization: Bearer sl_...</code> with the full key.</td></tr>
+<tr><td><code>body must be a JSON array of records; wrap a single record in [ ]</code></td><td>You sent <code>{...}</code> to the batch endpoint.</td><td>Send <code>[{...}]</code>.</td></tr>
+<tr><td><code>invalid request body</code></td><td>The batch is not valid JSON somewhere.</td><td>Serialise with a JSON library; do not build JSON by string concatenation.</td></tr>
+<tr><td><code>record is not valid JSON</code></td><td>Stream line is not valid JSON.</td><td>One complete JSON object per line, no line breaks inside it.</td></tr>
+<tr><td><code>record must be a JSON object</code></td><td>An array element or line is a number, string or array.</td><td>Each record must be <code>{...}</code>.</td></tr>
+<tr><td><code>url is required</code>, <code>method is required</code></td><td>Field missing or empty.</td><td>Always send both.</td></tr>
+<tr><td><code>url must be an absolute URL</code></td><td>No scheme or host, for example <code>/products</code> or <code>example.com/x</code>.</td><td>Send the full URL with <code>https://</code>.</td></tr>
+<tr><td><code>ts must be an RFC 3339 timestamp</code></td><td>Wrong format or no timezone.</td><td>Send <code>2026-11-08T14:03:07.123Z</code>.</td></tr>
+<tr><td><code>ts is more than 60 days in the past</code>, <code>ts is more than 1 hour in the future</code></td><td>Clock wrong, timezone wrong, or old backlog.</td><td>Send UTC with <code>Z</code>; check the scraper machine's clock.</td></tr>
+<tr><td><code>status must be between 0 and 999</code></td><td>Out of range.</td><td>Send the HTTP status code, or 0 for no response.</td></tr>
+<tr><td><code>&lt;field&gt; must be a int</code>, <code>&lt;field&gt; must be a uint32</code></td><td>Number sent as a string, as a decimal, or negative.</td><td>Send a whole, non-negative JSON number.</td></tr>
+<tr><td><code>&lt;field&gt; must be a string</code>, <code>tags.&lt;name&gt; must be a string</code></td><td>Number, boolean or object where a string is required.</td><td>Convert to a string, for example <code>"2"</code>.</td></tr>
+<tr><td><code>request_body_encoding must be utf8 or base64</code>, <code>body_encoding must be utf8 or base64</code></td><td>Unknown encoding name.</td><td>Use <code>utf8</code> or <code>base64</code>.</td></tr>
+<tr><td><code>request_body is not valid base64</code>, <code>body is not valid base64</code></td><td>Wrong alphabet, missing padding or not base64.</td><td>Use standard base64 with <code>=</code> padding (not URL-safe base64).</td></tr>
+<tr><td><code>request_body exceeds MAX_BODY_BYTES ({{.MaxBodyBytes}} bytes)</code></td><td>Request body too large.</td><td>Leave it out or shorten it.</td></tr>
+<tr><td><code>batch exceeds MAX_BATCH_RECORDS ({{.MaxBatchRecords}})</code></td><td>Too many records.</td><td>Send at most {{.MaxBatchRecords}} per request.</td></tr>
+<tr><td><code>request body exceeds MAX_REQUEST_BYTES ({{.MaxRequestBytes}} bytes)</code>, <code>decoded request body exceeds {{.MaxDecodedBytes}} bytes</code></td><td>Batch too large.</td><td>Send fewer records per batch, or compress.</td></tr>
+<tr><td><code>unsupported Content-Encoding; use gzip, zstd or none</code></td><td>For example <code>br</code> or <code>deflate</code>.</td><td>Use gzip or zstd.</td></tr>
+<tr><td><code>rate limit exceeded</code></td><td>See <a href="#ratelimit">rate limit</a>.</td><td>Wait <code>Retry-After</code> seconds.</td></tr>
+<tr><td><code>clickhouse unavailable</code>, <code>server shutting down</code></td><td>Temporary server problem.</td><td>Wait <code>Retry-After</code> seconds and resend with the same <code>request_id</code> values.</td></tr>
+<tr><td><code>storage budget exceeded</code></td><td>Server storage full.</td><td>Tell the operator.</td></tr>
+</table>
+
+<h2 id="examples">18. Client examples</h2>
+<p>These use only each language's standard library. Each one sets <code>request_id</code>, compresses, and retries correctly.</p>
+
+<h3>Python 3</h3>
+<pre><code>import gzip
+import json
+import os
+import time
+import urllib.error
+import urllib.request
+import uuid
+
+SCRAPELOG_URL = os.environ.get("SCRAPELOG_URL", "{{.BaseURL}}")
+SCRAPELOG_KEY = os.environ["SCRAPELOG_KEY"]
+RETRYABLE_STATUSES = {429, 502, 503, 504, 520, 521, 522, 523, 524}
+
+
+def send_batch(records, max_attempts=5):
+    for record in records:
+        record.setdefault("request_id", str(uuid.uuid4()))
+    payload = gzip.compress(json.dumps(records).encode("utf-8"))
+
+    for attempt in range(max_attempts):
+        request = urllib.request.Request(
+            SCRAPELOG_URL + "/v1/requests",
+            data=payload,
+            method="POST",
+            headers={
+                "Authorization": "Bearer " + SCRAPELOG_KEY,
+                "Content-Type": "application/json",
+                "Content-Encoding": "gzip",
+                "User-Agent": "scrapelog-client/1.0",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                summary = json.load(response)
+                for rejection in summary["errors"]:
+                    print("scrapelog rejected record", rejection["index"], rejection["error"])
+                return summary
+        except urllib.error.HTTPError as http_error:
+            if http_error.code not in RETRYABLE_STATUSES:
+                raise RuntimeError(f"scrapelog {http_error.code}: {http_error.read().decode()}") from None
+            time.sleep(int(http_error.headers.get("Retry-After") or 2 ** attempt))
+        except (urllib.error.URLError, TimeoutError):
+            time.sleep(2 ** attempt)
+    raise RuntimeError(f"scrapelog: giving up after {max_attempts} attempts")
+
+
+send_batch([
+    {
+        "url": "https://example.com/products?page=2",
+        "method": "GET",
+        "ts": "2026-11-08T14:03:07.123Z",
+        "status": 200,
+        "latency_ms": 412,
+        "scraper": "products",
+    },
+])</code></pre>
+
+<h3>Node.js 18 or newer</h3>
+<pre><code>import { gzipSync } from "node:zlib";
+import { randomUUID } from "node:crypto";
+
+const SCRAPELOG_URL = process.env.SCRAPELOG_URL ?? "{{.BaseURL}}";
+const SCRAPELOG_KEY = process.env.SCRAPELOG_KEY;
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504, 520, 521, 522, 523, 524]);
+
+async function sendBatch(records, maxAttempts = 5) {
+  for (const record of records) record.request_id ??= randomUUID();
+  const payload = gzipSync(JSON.stringify(records));
+
+  for (let attempt = 0; attempt &lt; maxAttempts; attempt++) {
+    let response;
+    try {
+      response = await fetch(`${SCRAPELOG_URL}/v1/requests`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SCRAPELOG_KEY}`,
+          "Content-Type": "application/json",
+          "Content-Encoding": "gzip",
+        },
+        body: payload,
+        signal: AbortSignal.timeout(60_000),
+      });
+    } catch {
+      await new Promise((resolve) =&gt; setTimeout(resolve, 2 ** attempt * 1000));
+      continue;
+    }
+    if (response.ok) {
+      const summary = await response.json();
+      for (const rejection of summary.errors) console.warn("scrapelog rejected record", rejection.index, rejection.error);
+      return summary;
+    }
+    if (!RETRYABLE_STATUSES.has(response.status)) {
+      throw new Error(`scrapelog ${response.status}: ${await response.text()}`);
+    }
+    const waitSeconds = Number(response.headers.get("Retry-After")) || 2 ** attempt;
+    await new Promise((resolve) =&gt; setTimeout(resolve, waitSeconds * 1000));
+  }
+  throw new Error(`scrapelog: giving up after ${maxAttempts} attempts`);
+}
+
+await sendBatch([
+  { url: "https://example.com/products?page=2", method: "GET", status: 200, latency_ms: 412, scraper: "products" },
+]);</code></pre>
+
+<h3>curl, stream</h3>
+<pre><code>printf '%s\n' \
+  '{"url":"https://example.com/a","method":"GET","status":200,"latency_ms":120}' \
+  '{"url":"https://example.com/b","method":"GET","status":0,"error":"timeout","latency_ms":30000}' |
+curl -sS -X POST "$SCRAPELOG_URL/v1/requests/stream" \
+  -H "Authorization: Bearer $SCRAPELOG_KEY" \
+  -H "Content-Type: application/x-ndjson" \
+  -H "Transfer-Encoding: chunked" \
+  --data-binary @-</code></pre>
+</body>
+</html>

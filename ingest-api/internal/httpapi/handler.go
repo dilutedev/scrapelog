@@ -25,6 +25,7 @@ func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse
 	recordLimiter := ratelimit.New(loadedConfig.RateLimitRecordsPerMinute, time.Now)
 	router := http.NewServeMux()
 	router.HandleFunc("GET /v1/health", healthHandler(logger, clickHouse))
+	router.HandleFunc("GET /docs", docsHandler(logger, loadedConfig))
 	router.HandleFunc("POST /v1/admin/keys", requireAdmin(adminTokenHash, createKeyHandler(logger, keyStore, keyCache)))
 	router.HandleFunc("GET /v1/admin/keys", requireAdmin(adminTokenHash, listKeysHandler(logger, keyStore)))
 	router.HandleFunc("DELETE /v1/admin/keys/{key_id}", requireAdmin(adminTokenHash, revokeKeyHandler(logger, keyStore, keyCache)))

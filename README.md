@@ -139,6 +139,10 @@ Returns the calling key's project: `{"project", "row_count", "oldest_ts", "newes
 
 No authentication. 200 `{"status":"ok"}` when ClickHouse answers, 503 otherwise.
 
+### GET /docs
+
+No authentication. An HTML page for scraper authors: authentication, record fields, batch and stream usage, status codes and examples. Example URLs use the request's `Host`, `X-Forwarded-Proto` and `X-Forwarded-Prefix`, so a proxy that serves the API under a path prefix (for example `/api`) should set `X-Forwarded-Prefix` to that prefix.
+
 ### Admin routes
 
 All need the admin token. The `scrapelog keys` command inside the `ingest-api` container calls the first three.
