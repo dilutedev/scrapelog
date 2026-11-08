@@ -1,0 +1,13 @@
+clickhouse.example.com {
+	encode zstd gzip
+
+	handle /v1/* {
+		reverse_proxy 127.0.0.1:8080 {
+			header_up X-Real-IP {client_ip}
+		}
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+}
