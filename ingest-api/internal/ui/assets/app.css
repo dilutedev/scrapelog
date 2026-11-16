@@ -755,7 +755,8 @@ body {
 }
 
 .alerts,
-.alert-edit {
+.alert-edit,
+.archive {
   padding: 1rem 1.5rem;
   max-width: 60rem;
 }
@@ -766,8 +767,13 @@ body {
   align-items: baseline;
 }
 
-.alerts-header a.action-button {
+.alerts-header a.action-button,
+.archive a.action-button {
   text-decoration: none;
+}
+
+.archive button.action-button {
+  font: inherit;
 }
 
 .rule-list,

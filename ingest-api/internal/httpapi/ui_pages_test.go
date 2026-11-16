@@ -218,3 +218,34 @@ func TestAlertPagesRenderWithSession(t *testing.T) {
 		})
 	}
 }
+
+func TestArchivePageRequiresSession(t *testing.T) {
+	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/archive", ""))
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("status %d, want 302", recorder.Code)
+	}
+	if location := recorder.Header().Get("Location"); location != "/login?next=%2Farchive" {
+		t.Fatalf("location %q, want /login?next=%%2Farchive", location)
+	}
+	if recorder.Header().Get("Content-Security-Policy") != contentSecurityPolicy {
+		t.Fatal("missing content security policy")
+	}
+}
+
+func TestArchivePageRendersWithSession(t *testing.T) {
+	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/archive", newTestSigner().Issue()))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", recorder.Code)
+	}
+	body := recorder.Body.String()
+	for _, fragment := range []string{"archive.js", "shell.js", `href="/archive" aria-current="page"`, `id="archive-list"`, `id="restore-form"`, `id="restore-list"`} {
+		if !strings.Contains(body, fragment) {
+			t.Fatalf("page missing %q:\n%s", fragment, body)
+		}
+	}
+	for _, forbidden := range []string{"<script>", "style=", "onclick=", "onload="} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("page contains inline %q", forbidden)
+		}
+	}
+}

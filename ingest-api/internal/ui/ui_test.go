@@ -79,9 +79,11 @@ func TestTopbarMarksCurrentSection(t *testing.T) {
 		requestsCurrent  string
 		bandwidthCurrent string
 		alertsCurrent    string
+		archiveCurrent   string
 	}{
-		"bandwidth":  {page: "bandwidth", requestsCurrent: "false", bandwidthCurrent: "page", alertsCurrent: "false"},
-		"alert edit": {page: "alert-edit", requestsCurrent: "false", bandwidthCurrent: "false", alertsCurrent: "page"},
+		"bandwidth":  {page: "bandwidth", requestsCurrent: "false", bandwidthCurrent: "page", alertsCurrent: "false", archiveCurrent: "false"},
+		"alert edit": {page: "alert-edit", requestsCurrent: "false", bandwidthCurrent: "false", alertsCurrent: "page", archiveCurrent: "false"},
+		"archive":    {page: "archive", requestsCurrent: "false", bandwidthCurrent: "false", alertsCurrent: "false", archiveCurrent: "page"},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -94,6 +96,7 @@ func TestTopbarMarksCurrentSection(t *testing.T) {
 				`<a href="/requests" aria-current="` + test.requestsCurrent + `">Requests</a>`,
 				`<a href="/bandwidth" aria-current="` + test.bandwidthCurrent + `">Bandwidth</a>`,
 				`<a href="/alerts" aria-current="` + test.alertsCurrent + `">Alerts</a>`,
+				`<a href="/archive" aria-current="` + test.archiveCurrent + `">Archive</a>`,
 				`id="sign-out"`,
 				`/assets/v/shell.js`,
 			}

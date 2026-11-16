@@ -64,6 +64,7 @@ func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse
 	router.HandleFunc("GET /bandwidth", withSecurityHeaders(requireSessionPage(sessionSigner, ui.PageHandler(logger, "bandwidth"))))
 	router.HandleFunc("GET /alerts", withSecurityHeaders(requireSessionPage(sessionSigner, ui.PageHandler(logger, "alerts"))))
 	router.HandleFunc("GET /alerts/{rule_id}", withSecurityHeaders(requireSessionPage(sessionSigner, ui.PageHandler(logger, "alert-edit"))))
+	router.HandleFunc("GET /archive", withSecurityHeaders(requireSessionPage(sessionSigner, ui.PageHandler(logger, "archive"))))
 	router.HandleFunc("GET /requests", withSecurityHeaders(requireSessionPage(sessionSigner, ui.PageHandler(logger, "requests"))))
 	router.HandleFunc("GET /assets/", withSecurityHeaders(ui.AssetHandler()))
 	return router
