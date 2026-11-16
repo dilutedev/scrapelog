@@ -753,3 +753,171 @@ body {
     display: none;
   }
 }
+
+.alerts,
+.alert-edit {
+  padding: 1rem 1.5rem;
+  max-width: 60rem;
+}
+
+.alerts-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.alerts-header a.action-button {
+  text-decoration: none;
+}
+
+.rule-list,
+.event-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rule-list li,
+.event-list li {
+  padding: 0.5rem 0.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.rule-list li:hover,
+.event-list li:hover {
+  background: var(--sheet);
+}
+
+.rule-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.25rem 1rem;
+}
+
+.rule-channel {
+  text-align: right;
+  color: var(--graphite);
+}
+
+.rule-sentence {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--graphite);
+}
+
+.event-summary {
+  margin: 0;
+}
+
+.sample-line {
+  margin: 0.25rem 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--size-small);
+  overflow-wrap: anywhere;
+}
+
+.rule-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.rule-form input:not([type="radio"]):not([type="checkbox"]),
+.rule-form select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+}
+
+.rule-form button {
+  font: inherit;
+  cursor: pointer;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.25rem 0.75rem;
+}
+
+.rule-form button:disabled {
+  cursor: default;
+  color: var(--graphite);
+}
+
+.rule-form fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+}
+
+.condition-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.condition-rows li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.condition-value {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.saved-tag {
+  color: var(--graphite);
+  font-size: var(--size-small);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0 0.375rem;
+}
+
+.rule-preview {
+  margin: 0.5rem 0;
+  font-size: var(--size-large);
+  color: var(--ink);
+}
+
+.editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+#rule-window {
+  width: 6ch;
+}
+
+@media (max-width: 759px) {
+  .alerts,
+  .alert-edit {
+    padding: 1rem;
+  }
+
+  .condition-rows li > * {
+    flex: 1 1 100%;
+  }
+}
+
+.rule-form [hidden],
+.rule-form[hidden] {
+  display: none;
+}
+
+#discord-fields:not([hidden]),
+#telegram-fields:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}

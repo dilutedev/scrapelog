@@ -74,22 +74,35 @@ func TestAssetVersionIsTwelveHexCharacters(t *testing.T) {
 }
 
 func TestTopbarMarksCurrentSection(t *testing.T) {
-	var rendered bytes.Buffer
-	if err := pageTemplates.ExecuteTemplate(&rendered, "topbar", pageData{AssetVersion: "v", Page: "bandwidth"}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	tests := map[string]struct {
+		page             string
+		requestsCurrent  string
+		bandwidthCurrent string
+		alertsCurrent    string
+	}{
+		"bandwidth":  {page: "bandwidth", requestsCurrent: "false", bandwidthCurrent: "page", alertsCurrent: "false"},
+		"alert edit": {page: "alert-edit", requestsCurrent: "false", bandwidthCurrent: "false", alertsCurrent: "page"},
 	}
-	output := rendered.String()
-	wantFragments := []string{
-		`<a href="/requests" aria-current="false">Requests</a>`,
-		`<a href="/bandwidth" aria-current="page">Bandwidth</a>`,
-		`<a href="/alerts" aria-current="false">Alerts</a>`,
-		`id="sign-out"`,
-		`/assets/v/shell.js`,
-	}
-	for _, fragment := range wantFragments {
-		if !strings.Contains(output, fragment) {
-			t.Fatalf("output missing %q:\n%s", fragment, output)
-		}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			var rendered bytes.Buffer
+			if err := pageTemplates.ExecuteTemplate(&rendered, "topbar", pageData{AssetVersion: "v", Page: test.page}); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			output := rendered.String()
+			wantFragments := []string{
+				`<a href="/requests" aria-current="` + test.requestsCurrent + `">Requests</a>`,
+				`<a href="/bandwidth" aria-current="` + test.bandwidthCurrent + `">Bandwidth</a>`,
+				`<a href="/alerts" aria-current="` + test.alertsCurrent + `">Alerts</a>`,
+				`id="sign-out"`,
+				`/assets/v/shell.js`,
+			}
+			for _, fragment := range wantFragments {
+				if !strings.Contains(output, fragment) {
+					t.Fatalf("output missing %q:\n%s", fragment, output)
+				}
+			}
+		})
 	}
 }
 

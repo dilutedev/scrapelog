@@ -161,3 +161,60 @@ func TestBandwidthPageRendersWithSession(t *testing.T) {
 		}
 	}
 }
+
+func TestAlertPagesRequireSession(t *testing.T) {
+	for _, target := range []string{"/alerts", "/alerts/new", "/alerts/0190abcd"} {
+		t.Run(target, func(t *testing.T) {
+			recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, target, ""))
+			if recorder.Code != http.StatusFound {
+				t.Fatalf("status %d, want 302", recorder.Code)
+			}
+			wantLocation := "/login?next=" + url.QueryEscape(target)
+			if location := recorder.Header().Get("Location"); location != wantLocation {
+				t.Fatalf("location %q, want %q", location, wantLocation)
+			}
+			if recorder.Header().Get("Content-Security-Policy") != contentSecurityPolicy {
+				t.Fatal("missing content security policy")
+			}
+		})
+	}
+}
+
+func TestAlertPagesRenderWithSession(t *testing.T) {
+	tests := map[string]struct {
+		target        string
+		wantFragments []string
+	}{
+		"list": {
+			target:        "/alerts",
+			wantFragments: []string{"alerts.js", "shell.js", `href="/alerts" aria-current="page"`, `id="rule-list"`, `id="event-list"`},
+		},
+		"new rule": {
+			target:        "/alerts/new",
+			wantFragments: []string{"alert-edit.js", "shell.js", `href="/alerts" aria-current="page"`, `id="rule-form"`, `id="discord-webhook"`, `id="send-test"`},
+		},
+		"existing rule": {
+			target:        "/alerts/0190abcd",
+			wantFragments: []string{"alert-edit.js", "shell.js", `href="/alerts" aria-current="page"`, `id="rule-form"`, `id="discord-webhook"`, `id="send-test"`},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, test.target, newTestSigner().Issue()))
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status %d, want 200", recorder.Code)
+			}
+			body := recorder.Body.String()
+			for _, fragment := range test.wantFragments {
+				if !strings.Contains(body, fragment) {
+					t.Fatalf("page missing %q:\n%s", fragment, body)
+				}
+			}
+			for _, forbidden := range []string{"<script>", "style=", "onclick=", "onload="} {
+				if strings.Contains(body, forbidden) {
+					t.Fatalf("page contains inline %q", forbidden)
+				}
+			}
+		})
+	}
+}
