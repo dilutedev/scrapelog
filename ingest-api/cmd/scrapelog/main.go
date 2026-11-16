@@ -13,6 +13,7 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 
+	"github.com/dilutedev/scrapelog/ingest-api/internal/alerts"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/apikeys"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/bodies"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
@@ -115,12 +116,20 @@ func serve() int {
 		bodyGetter = s3Client
 	}
 	bodyStore := bodies.NewStore(bodyUploader, loadedConfig.S3BodyPrefix, logger)
+	alertStore := alerts.NewStore(connection)
+	alertCache := alerts.NewCache(alertStore)
+	alertStartupContext, cancelAlertStartup := context.WithTimeout(signalContext, 10*time.Second)
+	if err := alertCache.Refresh(alertStartupContext); err != nil {
+		logger.Error("loading alert rules failed", "error", err)
+	}
+	cancelAlertStartup()
 	go keyCache.RunRefreshLoop(signalContext, logger)
+	go alertCache.RunRefreshLoop(signalContext, logger)
 	go diskGuard.RunRefreshLoop(signalContext, logger)
 
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, requestReader, bodyGetter, loadedConfig),
+		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, requestReader, bodyGetter, alertStore, alertCache, loadedConfig),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

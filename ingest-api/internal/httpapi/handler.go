@@ -22,7 +22,7 @@ type KeyCache interface {
 	KeyRefresher
 }
 
-func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse ClickHousePinger, keyStore KeyStore, keyCache KeyCache, recordWriter RecordWriter, bodyStore BodyStore, storageReporter StorageReporter, diskGuard DiskGuard, requestReader RequestReader, bodyGetter BodyGetter, loadedConfig config.Config) http.Handler {
+func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse ClickHousePinger, keyStore KeyStore, keyCache KeyCache, recordWriter RecordWriter, bodyStore BodyStore, storageReporter StorageReporter, diskGuard DiskGuard, requestReader RequestReader, bodyGetter BodyGetter, alertStore AlertStore, alertRuleRefresher AlertRuleRefresher, loadedConfig config.Config) http.Handler {
 	adminTokenHash := sha256.Sum256([]byte(loadedConfig.AdminToken))
 	recordLimiter := ratelimit.New(loadedConfig.RateLimitRecordsPerMinute, time.Now)
 	sessionSigner := session.New(loadedConfig.AdminToken, time.Now)
@@ -45,6 +45,11 @@ func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse
 	router.HandleFunc("GET /ui/api/request/body", withSecurityHeaders(requireSession(sessionSigner, requestBodyHandler(logger, requestReader, bodyGetter))))
 	router.HandleFunc("GET /ui/api/tape", withSecurityHeaders(requireSession(sessionSigner, tapeHandler(logger, requestReader))))
 	router.HandleFunc("GET /ui/api/facets", withSecurityHeaders(requireSession(sessionSigner, facetsHandler(logger, requestReader))))
+	router.HandleFunc("GET /ui/api/alert-rules", withSecurityHeaders(requireSession(sessionSigner, listAlertRulesHandler(logger, alertStore))))
+	router.HandleFunc("POST /ui/api/alert-rules", withSecurityHeaders(requireSession(sessionSigner, requireSameOriginJSON(createAlertRuleHandler(logger, alertStore, alertRuleRefresher)))))
+	router.HandleFunc("PUT /ui/api/alert-rules/{rule_id}", withSecurityHeaders(requireSession(sessionSigner, requireSameOriginJSON(updateAlertRuleHandler(logger, alertStore, alertRuleRefresher)))))
+	router.HandleFunc("DELETE /ui/api/alert-rules/{rule_id}", withSecurityHeaders(requireSession(sessionSigner, requireSameOriginJSON(deleteAlertRuleHandler(logger, alertStore, alertRuleRefresher)))))
+	router.HandleFunc("GET /ui/api/alert-events", withSecurityHeaders(requireSession(sessionSigner, listAlertEventsHandler(logger, alertStore))))
 	router.HandleFunc("GET /{$}", withSecurityHeaders(http.RedirectHandler("/requests", http.StatusFound).ServeHTTP))
 	router.HandleFunc("GET /login", withSecurityHeaders(ui.PageHandler(logger, "login")))
 	router.HandleFunc("GET /assets/", withSecurityHeaders(ui.AssetHandler()))
