@@ -1,0 +1,92 @@
+package ui
+
+import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
+	"regexp"
+	"strings"
+	"testing"
+)
+
+func serveAsset(target string) *httptest.ResponseRecorder {
+	recorder := httptest.NewRecorder()
+	AssetHandler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
+	return recorder
+}
+
+func TestAssetHandlerServesVersionedFileWithImmutableCache(t *testing.T) {
+	recorder := serveAsset("/assets/" + assetVersion + "/app.css")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", recorder.Code)
+	}
+	if contentType := recorder.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "text/css") {
+		t.Fatalf("content type %q, want text/css", contentType)
+	}
+	if recorder.Body.Len() == 0 {
+		t.Fatal("empty body")
+	}
+	if cacheControl := recorder.Header().Get("Cache-Control"); cacheControl != "public, max-age=31536000, immutable" {
+		t.Fatalf("cache control %q", cacheControl)
+	}
+}
+
+func TestAssetHandlerReturnsNotFoundWithoutCacheHeader(t *testing.T) {
+	tests := map[string]string{
+		"wrong version": "/assets/000000000000/app.css",
+		"unknown file":  "/assets/" + assetVersion + "/missing.css",
+		"directory":     "/assets/" + assetVersion + "/fonts",
+		"bare prefix":   "/assets/",
+	}
+	for name, target := range tests {
+		t.Run(name, func(t *testing.T) {
+			recorder := serveAsset(target)
+			if recorder.Code != http.StatusNotFound {
+				t.Fatalf("status %d, want 404", recorder.Code)
+			}
+			if cacheControl := recorder.Header().Get("Cache-Control"); cacheControl != "" {
+				t.Fatalf("cache control %q, want empty", cacheControl)
+			}
+		})
+	}
+}
+
+func TestAssetHandlerServesWoff2AsFontType(t *testing.T) {
+	for _, fileName := range []string{"AtkinsonHyperlegibleNext.woff2", "AtkinsonHyperlegibleMono.woff2"} {
+		t.Run(fileName, func(t *testing.T) {
+			recorder := serveAsset("/assets/" + assetVersion + "/fonts/" + fileName)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status %d, want 200", recorder.Code)
+			}
+			if contentType := recorder.Header().Get("Content-Type"); contentType != "font/woff2" {
+				t.Fatalf("content type %q, want font/woff2", contentType)
+			}
+		})
+	}
+}
+
+func TestAssetVersionIsTwelveHexCharacters(t *testing.T) {
+	if !regexp.MustCompile(`^[0-9a-f]{12}$`).MatchString(assetVersion) {
+		t.Fatalf("asset version %q is not 12 hex characters", assetVersion)
+	}
+}
+
+func TestTopbarMarksCurrentSection(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := pageTemplates.ExecuteTemplate(&rendered, "topbar", pageData{AssetVersion: "v", Page: "bandwidth"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	output := rendered.String()
+	wantFragments := []string{
+		`<a href="/requests" aria-current="false">Requests</a>`,
+		`<a href="/bandwidth" aria-current="page">Bandwidth</a>`,
+		`<a href="/alerts" aria-current="false">Alerts</a>`,
+		`id="sign-out"`,
+		`/assets/v/shell.js`,
+	}
+	for _, fragment := range wantFragments {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("output missing %q:\n%s", fragment, output)
+		}
+	}
+}

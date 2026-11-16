@@ -1,0 +1,151 @@
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url(fonts/AtkinsonHyperlegibleNext.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Atkinson Hyperlegible Mono";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url(fonts/AtkinsonHyperlegibleMono.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  --paper: #EEF0EC;
+  --sheet: #F8F9F6;
+  --ink: #1D2A33;
+  --graphite: #5B6770;
+  --rule: #C9CFC9;
+  --focus: #2457C5;
+  --status-2xx: #3F7D5C;
+  --status-3xx: #5A6FA8;
+  --status-4xx: #C9821A;
+  --status-5xx: #B8432F;
+  --status-0: #7A4E9C;
+  --font-sans: "Atkinson Hyperlegible Next", system-ui, sans-serif;
+  --font-mono: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
+  --size-small: 12.5px;
+  --size-body: 15px;
+  --size-large: 18px;
+  --size-heading: 21.5px;
+  --size-title: 26px;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--size-body);
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.topbar .brand {
+  font-size: var(--size-large);
+  font-weight: 600;
+}
+
+.topbar nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+}
+
+.topbar nav a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.topbar nav a[aria-current="page"] {
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.topbar #sign-out {
+  margin-left: auto;
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.25rem 0.75rem;
+  cursor: pointer;
+}
+
+.login {
+  display: flex;
+  flex-direction: column;
+  max-width: 22rem;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 4rem 1.5rem;
+}
+
+.login h1 {
+  margin: 0 0 1.5rem;
+  font-size: var(--size-title);
+  font-weight: 600;
+}
+
+.login form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.login label {
+  font-weight: 600;
+}
+
+.login input {
+  font: inherit;
+  color: var(--ink);
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+}
+
+.login #login-error {
+  margin: 0;
+  color: var(--status-5xx);
+}
+
+.login button {
+  font: inherit;
+  font-weight: 600;
+  color: var(--sheet);
+  background: var(--ink);
+  border: 0;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+
+.login button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
