@@ -68,12 +68,13 @@ func prepareStackEnvironment() error {
 	composeProjectName = "scrapelog-it-" + runIdentifier
 	baseURL = "http://127.0.0.1:" + port
 	adminToken = randomHex(16)
-	clickHousePasswords = []string{randomHex(16), randomHex(16), randomHex(16)}
+	clickHousePasswords = []string{randomHex(16), randomHex(16), randomHex(16), randomHex(16)}
 	bodyMarker = "marker-" + randomHex(8)
 	stackEnvironment = append(os.Environ(),
 		"CLICKHOUSE_ADMIN_PASSWORD="+clickHousePasswords[0],
 		"CLICKHOUSE_INGEST_PASSWORD="+clickHousePasswords[1],
 		"CLICKHOUSE_READER_PASSWORD="+clickHousePasswords[2],
+		"CLICKHOUSE_ARCHIVER_PASSWORD="+clickHousePasswords[3],
 		"ADMIN_TOKEN="+adminToken,
 		"GRAFANA_ADMIN_PASSWORD="+randomHex(16),
 		"INGEST_API_PORT="+port,

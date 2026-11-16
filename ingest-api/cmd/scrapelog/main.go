@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 
 	"github.com/dilutedev/scrapelog/ingest-api/internal/alerts"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/apikeys"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/archive"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/bodies"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/httpapi"
@@ -85,6 +87,22 @@ func serve() int {
 	}
 	defer readerConnection.Close()
 
+	archiverOptions, err := clickhouse.ParseDSN(loadedConfig.ClickHouseURL)
+	if err != nil {
+		logger.Error("parsing clickhouse url failed", "error", err)
+		return 1
+	}
+	archiverOptions.Auth.Database = loadedConfig.ClickHouseDatabase
+	archiverOptions.Auth.Username = loadedConfig.ClickHouseArchiverUser
+	archiverOptions.Auth.Password = loadedConfig.ClickHouseArchiverPassword
+
+	archiverConnection, err := clickhouse.Open(archiverOptions)
+	if err != nil {
+		logger.Error("opening clickhouse archiver connection failed", "error", err)
+		return 1
+	}
+	defer archiverConnection.Close()
+
 	signalContext, stopSignalHandling := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignalHandling()
 
@@ -128,6 +146,13 @@ func serve() int {
 	go alertCache.RunRefreshLoop(signalContext, logger)
 	go alertDispatcher.Run()
 	go diskGuard.RunRefreshLoop(signalContext, logger)
+	if loadedConfig.S3Endpoint != "" {
+		if strings.HasSuffix(loadedConfig.S3Endpoint, "/") {
+			logger.Warn("archiving disabled: S3_ENDPOINT must not end with a slash")
+		} else {
+			go archive.NewArchiver(archiverConnection).Run(signalContext, logger)
+		}
+	}
 
 	server := &http.Server{
 		Addr:              listenAddress,

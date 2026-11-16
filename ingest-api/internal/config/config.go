@@ -9,18 +9,20 @@ import (
 )
 
 type Config struct {
-	ClickHouseURL            string
-	ClickHouseDatabase       string
-	ClickHouseUser           string
-	ClickHousePassword       string
-	ClickHouseReaderUser     string
-	ClickHouseReaderPassword string
-	AdminToken               string
-	PublicURL                string
-	MaxBatchRecords          int
-	MaxRequestBytes          int64
-	MaxBodyBytes             int64
-	RedactedHeaders          map[string]bool
+	ClickHouseURL              string
+	ClickHouseDatabase         string
+	ClickHouseUser             string
+	ClickHousePassword         string
+	ClickHouseReaderUser       string
+	ClickHouseReaderPassword   string
+	ClickHouseArchiverUser     string
+	ClickHouseArchiverPassword string
+	AdminToken                 string
+	PublicURL                  string
+	MaxBatchRecords            int
+	MaxRequestBytes            int64
+	MaxBodyBytes               int64
+	RedactedHeaders            map[string]bool
 
 	RateLimitRecordsPerMinute int64
 
@@ -36,14 +38,16 @@ type Config struct {
 
 func Load() (Config, error) {
 	loadedConfig := Config{
-		ClickHouseURL:            valueOrDefault("CLICKHOUSE_URL", "http://clickhouse:8123"),
-		ClickHouseDatabase:       valueOrDefault("CLICKHOUSE_DATABASE", "scrapelog"),
-		ClickHouseUser:           valueOrDefault("CLICKHOUSE_INGEST_USER", "ingest_writer"),
-		ClickHousePassword:       os.Getenv("CLICKHOUSE_INGEST_PASSWORD"),
-		ClickHouseReaderUser:     valueOrDefault("CLICKHOUSE_READER_USER", "ui_reader"),
-		ClickHouseReaderPassword: os.Getenv("CLICKHOUSE_READER_PASSWORD"),
-		AdminToken:               os.Getenv("ADMIN_TOKEN"),
-		PublicURL:                strings.TrimRight(os.Getenv("SCRAPELOG_PUBLIC_URL"), "/"),
+		ClickHouseURL:              valueOrDefault("CLICKHOUSE_URL", "http://clickhouse:8123"),
+		ClickHouseDatabase:         valueOrDefault("CLICKHOUSE_DATABASE", "scrapelog"),
+		ClickHouseUser:             valueOrDefault("CLICKHOUSE_INGEST_USER", "ingest_writer"),
+		ClickHousePassword:         os.Getenv("CLICKHOUSE_INGEST_PASSWORD"),
+		ClickHouseReaderUser:       valueOrDefault("CLICKHOUSE_READER_USER", "ui_reader"),
+		ClickHouseReaderPassword:   os.Getenv("CLICKHOUSE_READER_PASSWORD"),
+		ClickHouseArchiverUser:     valueOrDefault("CLICKHOUSE_ARCHIVER_USER", "archiver"),
+		ClickHouseArchiverPassword: os.Getenv("CLICKHOUSE_ARCHIVER_PASSWORD"),
+		AdminToken:                 os.Getenv("ADMIN_TOKEN"),
+		PublicURL:                  strings.TrimRight(os.Getenv("SCRAPELOG_PUBLIC_URL"), "/"),
 
 		S3Endpoint:        os.Getenv("S3_ENDPOINT"),
 		S3Bucket:          os.Getenv("S3_BUCKET"),
@@ -86,6 +90,9 @@ func Load() (Config, error) {
 	}
 	if loadedConfig.ClickHouseReaderPassword == "" {
 		return Config{}, errors.New("CLICKHOUSE_READER_PASSWORD is required")
+	}
+	if loadedConfig.ClickHouseArchiverPassword == "" {
+		return Config{}, errors.New("CLICKHOUSE_ARCHIVER_PASSWORD is required")
 	}
 	if loadedConfig.AdminToken == "" {
 		return Config{}, errors.New("ADMIN_TOKEN is required")

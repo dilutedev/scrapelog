@@ -4,6 +4,13 @@
             <async_insert>1</async_insert>
             <wait_for_async_insert>1</wait_for_async_insert>
         </ingest_writer>
+        <archiver>
+            <max_memory_usage>1073741824</max_memory_usage>
+            <max_threads>2</max_threads>
+            <max_insert_threads>1</max_insert_threads>
+            <max_execution_time>900</max_execution_time>
+            <output_format_parquet_row_group_size>100000</output_format_parquet_row_group_size>
+        </archiver>
         <grafana_reader>
             <readonly>1</readonly>
             <max_memory_usage>2147483648</max_memory_usage>
@@ -86,5 +93,21 @@
                 <query>GRANT SELECT ON system.parts</query>
             </grants>
         </ui_reader>
+        <archiver>
+            <password from_env="CLICKHOUSE_ARCHIVER_PASSWORD"/>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>archiver</profile>
+            <quota>default</quota>
+            <grants>
+                <query>GRANT SELECT ON scrapelog.requests</query>
+                <query>GRANT INSERT, SELECT ON scrapelog.archive_days</query>
+                <query>GRANT SELECT ON system.parts</query>
+                <query>GRANT NAMED COLLECTION ON archive_s3</query>
+                <query>GRANT CREATE TEMPORARY TABLE ON *.*</query>
+                <query from_env="ARCHIVE_S3_GRANT"/>
+            </grants>
+        </archiver>
     </users>
 </clickhouse>
