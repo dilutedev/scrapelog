@@ -3,14 +3,17 @@
 package integration
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -19,10 +22,12 @@ import (
 )
 
 const (
-	bulkRecordCount     = 1000
-	revocationDeadline  = 35 * time.Second
-	readBackDeadline    = 20 * time.Second
-	composeLogLineLimit = "80"
+	bulkRecordCount              = 1000
+	revocationDeadline           = 35 * time.Second
+	readBackDeadline             = 20 * time.Second
+	alertDeliveryDeadline        = 45 * time.Second
+	webhookReceiverStartDeadline = 90 * time.Second
+	composeLogLineLimit          = "80"
 )
 
 var (
@@ -32,6 +37,8 @@ var (
 	adminToken          string
 	clickHousePasswords []string
 	bodyMarker          string
+	webhookSecret       string
+	telegramTokenMarker string
 	createdKeys         []string
 	stackEnvironment    []string
 	httpClient          = &http.Client{Timeout: 30 * time.Second}
@@ -70,6 +77,8 @@ func prepareStackEnvironment() error {
 	adminToken = randomHex(16)
 	clickHousePasswords = []string{randomHex(16), randomHex(16), randomHex(16), randomHex(16)}
 	bodyMarker = "marker-" + randomHex(8)
+	webhookSecret = randomHex(16)
+	telegramTokenMarker = randomHex(16)
 	stackEnvironment = append(os.Environ(),
 		"CLICKHOUSE_ADMIN_PASSWORD="+clickHousePasswords[0],
 		"CLICKHOUSE_INGEST_PASSWORD="+clickHousePasswords[1],
@@ -261,10 +270,137 @@ func buildRecords(count int, extraFields map[string]any) []map[string]any {
 	return records
 }
 
+func signIn(t *testing.T) string {
+	t.Helper()
+	login := func(token string) *http.Response {
+		payload, _ := json.Marshal(map[string]string{"token": token})
+		request, err := http.NewRequest(http.MethodPost, baseURL+"/ui/api/login", bytes.NewReader(payload))
+		if err != nil {
+			t.Fatalf("building login request: %v", err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		response, err := httpClient.Do(request)
+		if err != nil {
+			t.Fatalf("login request: %v", err)
+		}
+		response.Body.Close()
+		return response
+	}
+	if response := login("wrong"); response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("login with a wrong token returned %d, want 401", response.StatusCode)
+	}
+	response := login(adminToken)
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("login with the admin token returned %d, want 204", response.StatusCode)
+	}
+	for _, cookie := range response.Cookies() {
+		if cookie.Name == "scrapelog_session" {
+			return "scrapelog_session=" + cookie.Value
+		}
+	}
+	t.Fatal("login response set no session cookie")
+	return ""
+}
+
+const webhookReceiverSource = `package main
+
+import (
+	"encoding/base64"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+)
+
+func main() {
+	webhookPath := os.Getenv("WEBHOOK_PATH")
+	http.HandleFunc("/", func(responseWriter http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != webhookPath {
+			http.NotFound(responseWriter, request)
+			return
+		}
+		body, _ := io.ReadAll(request.Body)
+		fmt.Println("body", base64.StdEncoding.EncodeToString(body))
+		responseWriter.WriteHeader(http.StatusNoContent)
+	})
+	listener, err := net.Listen("tcp", ":8080")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("listening")
+	http.Serve(listener, nil)
+}
+`
+
+func startWebhookReceiver(t *testing.T) (string, <-chan []byte) {
+	t.Helper()
+	sourceDirectory := t.TempDir()
+	if err := os.WriteFile(sourceDirectory+"/main.go", []byte(webhookReceiverSource), 0o644); err != nil {
+		t.Fatalf("writing the webhook receiver source: %v", err)
+	}
+	webhookPath := "/webhook/" + webhookSecret
+	containerName := composeProjectName + "-webhook"
+	runOutput, err := exec.Command("docker", "run", "-d", "--rm", "--name", containerName,
+		"--network", composeProjectName+"_scrapelog", "--network-alias", "webhook",
+		"-v", sourceDirectory+":/receiver:ro", "-e", "WEBHOOK_PATH="+webhookPath,
+		"-e", "HOME=/tmp", "golang:1.27.3-trixie", "go", "run", "/receiver/main.go").CombinedOutput()
+	if err != nil {
+		t.Fatalf("starting the webhook receiver container: %v\n%s", err, runOutput)
+	}
+	t.Cleanup(func() { exec.Command("docker", "rm", "-f", containerName).Run() })
+
+	logsCommand := exec.Command("docker", "logs", "-f", containerName)
+	logsPipe, err := logsCommand.StdoutPipe()
+	if err != nil {
+		t.Fatalf("opening the webhook receiver logs: %v", err)
+	}
+	if err := logsCommand.Start(); err != nil {
+		t.Fatalf("following the webhook receiver logs: %v", err)
+	}
+	t.Cleanup(func() { logsCommand.Process.Kill(); logsCommand.Wait() })
+
+	listening := make(chan struct{})
+	deliveredBodies := make(chan []byte, 10)
+	go func() {
+		scanner := bufio.NewScanner(logsPipe)
+		scanner.Buffer(nil, 1<<20)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "listening" {
+				close(listening)
+			} else if encodedBody, found := strings.CutPrefix(line, "body "); found {
+				if body, decodeErr := base64.StdEncoding.DecodeString(encodedBody); decodeErr == nil {
+					deliveredBodies <- body
+				}
+			}
+		}
+	}()
+	select {
+	case <-listening:
+	case <-time.After(webhookReceiverStartDeadline):
+		t.Fatalf("webhook receiver not listening within %s", webhookReceiverStartDeadline)
+	}
+	return "http://webhook:8080" + webhookPath, deliveredBodies
+}
+
+func sessionJSONRequest(t *testing.T, method, path, sessionCookie string, payload any) (int, []byte) {
+	t.Helper()
+	var encoded []byte
+	if payload != nil {
+		var err error
+		encoded, err = json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("encoding payload for %s %s: %v", method, path, err)
+		}
+	}
+	return doRequest(t, method, path, map[string]string{"Cookie": sessionCookie, "Content-Type": "application/json"}, encoded)
+}
+
 func TestStack(t *testing.T) {
 	projectA := "it-" + runIdentifier + "-a"
 	projectB := "it-" + runIdentifier + "-b"
-	var keyA, keyB string
+	var keyA, keyB, sessionCookie string
 
 	t.Run("ingest_and_read_back", func(t *testing.T) {
 		_, keyA = createKey(t, projectA)
@@ -330,6 +466,152 @@ func TestStack(t *testing.T) {
 		}
 	})
 
+	t.Run("ui_sign_in", func(t *testing.T) {
+		if statusCode, responseBody := doRequest(t, http.MethodGet, "/ui/api/requests", nil, nil); statusCode != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated search returned %d, want 401: %s", statusCode, responseBody)
+		}
+		sessionCookie = signIn(t)
+	})
+
+	t.Run("alert_rule_and_search", func(t *testing.T) {
+		webhookURL, deliveredBodies := startWebhookReceiver(t)
+		conditions := []map[string]string{
+			{"field": "status", "operator": "equals", "value": "418"},
+			{"field": "body", "operator": "contains", "value": bodyMarker},
+		}
+		statusCode, responseBody := sessionJSONRequest(t, http.MethodPost, "/ui/api/alert-rules", sessionCookie, map[string]any{
+			"name":                "integration discord",
+			"project":             projectA,
+			"conditions":          conditions,
+			"channel":             "discord",
+			"discord_webhook_url": webhookURL,
+			"window_seconds":      10,
+			"enabled":             true,
+		})
+		if statusCode != http.StatusCreated {
+			t.Fatalf("creating the discord rule returned %d: %s", statusCode, responseBody)
+		}
+		var createdRule struct {
+			RuleID string `json:"rule_id"`
+		}
+		if err := json.Unmarshal(responseBody, &createdRule); err != nil {
+			t.Fatalf("decoding the created rule: %v", err)
+		}
+		statusCode, responseBody = sessionJSONRequest(t, http.MethodPost, "/ui/api/alert-rules", sessionCookie, map[string]any{
+			"name":               "integration telegram",
+			"project":            projectA,
+			"conditions":         conditions,
+			"channel":            "telegram",
+			"telegram_bot_token": "1:" + telegramTokenMarker,
+			"telegram_chat_id":   "1",
+			"window_seconds":     10,
+			"enabled":            false,
+		})
+		if statusCode != http.StatusCreated {
+			t.Fatalf("creating the telegram rule returned %d: %s", statusCode, responseBody)
+		}
+		statusCode, responseBody = sessionJSONRequest(t, http.MethodGet, "/ui/api/alert-rules", sessionCookie, nil)
+		if statusCode != http.StatusOK {
+			t.Fatalf("listing rules returned %d: %s", statusCode, responseBody)
+		}
+		for _, secret := range []string{webhookSecret, telegramTokenMarker} {
+			if strings.Contains(string(responseBody), secret) {
+				t.Fatalf("rule list contains a secret of length %d", len(secret))
+			}
+		}
+
+		const matchingCount = 50
+		accepted := postRecordsExpectingSuccess(t, keyA, buildRecords(matchingCount, map[string]any{"status": 418}))
+		if accepted.Accepted != matchingCount {
+			t.Fatalf("accepted %d matching records, want %d", accepted.Accepted, matchingCount)
+		}
+		accepted = postRecordsExpectingSuccess(t, keyA, buildRecords(20, nil))
+		if accepted.Accepted != 20 {
+			t.Fatalf("accepted %d non-matching records, want 20", accepted.Accepted)
+		}
+
+		searchPath := "/ui/api/requests?limit=500&q=" + url.QueryEscape("status:418 project:"+projectA)
+		stopAt := time.Now().Add(readBackDeadline)
+		var searchResult struct {
+			Rows []struct {
+				Status  int    `json:"status"`
+				Project string `json:"project"`
+			} `json:"rows"`
+		}
+		for {
+			statusCode, responseBody = sessionJSONRequest(t, http.MethodGet, searchPath, sessionCookie, nil)
+			if statusCode != http.StatusOK {
+				t.Fatalf("search returned %d: %s", statusCode, responseBody)
+			}
+			if err := json.Unmarshal(responseBody, &searchResult); err != nil {
+				t.Fatalf("decoding search: %v", err)
+			}
+			if len(searchResult.Rows) == matchingCount {
+				break
+			}
+			if time.Now().After(stopAt) {
+				t.Fatalf("search returned %d rows, want %d after %s", len(searchResult.Rows), matchingCount, readBackDeadline)
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		for _, row := range searchResult.Rows {
+			if row.Status != 418 || row.Project != projectA {
+				t.Fatalf("search row has status %d and project %q, want 418 and %q", row.Status, row.Project, projectA)
+			}
+		}
+
+		select {
+		case deliveredBody := <-deliveredBodies:
+			var message struct {
+				Content string `json:"content"`
+			}
+			if err := json.Unmarshal(deliveredBody, &message); err != nil {
+				t.Fatalf("decoding the webhook message: %v", err)
+			}
+			if !strings.Contains(message.Content, "50 matching requests in the last 10 s.") {
+				t.Fatalf("webhook message is %q", message.Content)
+			}
+		case <-time.After(alertDeliveryDeadline):
+			t.Fatalf("no webhook message within %s", alertDeliveryDeadline)
+		}
+		select {
+		case extraBody := <-deliveredBodies:
+			t.Fatalf("second webhook message: %s", extraBody)
+		case <-time.After(15 * time.Second):
+		}
+
+		eventsPath := "/ui/api/alert-events?rule_id=" + url.QueryEscape(createdRule.RuleID)
+		stopAt = time.Now().Add(readBackDeadline)
+		var events []struct {
+			MatchCount uint32          `json:"match_count"`
+			Delivery   string          `json:"delivery"`
+			Samples    json.RawMessage `json:"samples"`
+		}
+		for {
+			statusCode, responseBody = sessionJSONRequest(t, http.MethodGet, eventsPath, sessionCookie, nil)
+			if statusCode != http.StatusOK {
+				t.Fatalf("listing events returned %d: %s", statusCode, responseBody)
+			}
+			if err := json.Unmarshal(responseBody, &events); err != nil {
+				t.Fatalf("decoding events: %v", err)
+			}
+			if len(events) == 1 {
+				break
+			}
+			if time.Now().After(stopAt) {
+				t.Fatalf("rule has %d events, want 1 after %s", len(events), readBackDeadline)
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		var samples []json.RawMessage
+		if err := json.Unmarshal(events[0].Samples, &samples); err != nil {
+			t.Fatalf("decoding samples: %v", err)
+		}
+		if events[0].MatchCount != matchingCount || events[0].Delivery != "sent" || len(samples) != 3 {
+			t.Fatalf("event has match_count %d, delivery %q and %d samples, want %d, sent and 3", events[0].MatchCount, events[0].Delivery, len(samples), matchingCount)
+		}
+	})
+
 	t.Run("logs_contain_no_secrets", func(t *testing.T) {
 		apiLogs, err := composeLogs("ingest-api")
 		if err != nil {
@@ -346,7 +628,7 @@ func TestStack(t *testing.T) {
 			t.Fatal("clickhouse log is empty")
 		}
 
-		commonNeedles := append([]string{adminToken, bodyMarker}, createdKeys...)
+		commonNeedles := append([]string{adminToken, bodyMarker, webhookSecret, telegramTokenMarker}, createdKeys...)
 		apiOnlyNeedles := append([]string{"sl_", "Bearer"}, clickHousePasswords...)
 		for _, needle := range commonNeedles {
 			if strings.Contains(apiLogs, needle) {
