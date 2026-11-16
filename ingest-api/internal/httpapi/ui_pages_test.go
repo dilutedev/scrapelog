@@ -95,3 +95,39 @@ func TestSessionGatedPageRedirectsOrRenders(t *testing.T) {
 		t.Fatal("page not rendered with a valid session")
 	}
 }
+
+func TestRequestsPageRequiresSession(t *testing.T) {
+	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/requests?q=status:403", ""))
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("status %d, want 302", recorder.Code)
+	}
+	wantLocation := "/login?next=" + url.QueryEscape("/requests?q=status:403")
+	if location := recorder.Header().Get("Location"); location != wantLocation {
+		t.Fatalf("location %q, want %q", location, wantLocation)
+	}
+	if recorder.Header().Get("Content-Security-Policy") != contentSecurityPolicy {
+		t.Fatal("missing content security policy")
+	}
+}
+
+func TestRequestsPageRendersWithSession(t *testing.T) {
+	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/requests", newTestSigner().Issue()))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", recorder.Code)
+	}
+	if contentType := recorder.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "text/html") {
+		t.Fatalf("content type %q, want text/html", contentType)
+	}
+	body := recorder.Body.String()
+	wantFragments := []string{"requests.js", "shell.js", `href="/requests" aria-current="page"`, `id="query-input"`, `id="tape-chart"`, `id="detail-pane"`}
+	for _, fragment := range wantFragments {
+		if !strings.Contains(body, fragment) {
+			t.Fatalf("requests page missing %q:\n%s", fragment, body)
+		}
+	}
+	for _, forbidden := range []string{"<script>", "style="} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("requests page contains inline %q", forbidden)
+		}
+	}
+}

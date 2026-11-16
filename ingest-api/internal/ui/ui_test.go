@@ -2,8 +2,10 @@ package ui
 
 import (
 	"bytes"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"path"
 	"regexp"
 	"strings"
 	"testing"
@@ -88,5 +90,33 @@ func TestTopbarMarksCurrentSection(t *testing.T) {
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("output missing %q:\n%s", fragment, output)
 		}
+	}
+}
+
+func TestScriptsUseNoHTMLSinks(t *testing.T) {
+	forbiddenStrings := []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function"}
+	walkError := fs.WalkDir(embeddedFiles, "assets", func(filePath string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() && filePath == "assets/vendor" {
+			return fs.SkipDir
+		}
+		if entry.IsDir() || path.Ext(filePath) != ".js" {
+			return nil
+		}
+		content, readErr := fs.ReadFile(embeddedFiles, filePath)
+		if readErr != nil {
+			return readErr
+		}
+		for _, forbidden := range forbiddenStrings {
+			if strings.Contains(string(content), forbidden) {
+				t.Errorf("%s contains %q", filePath, forbidden)
+			}
+		}
+		return nil
+	})
+	if walkError != nil {
+		t.Fatalf("unexpected error: %v", walkError)
 	}
 }

@@ -52,6 +52,7 @@ func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse
 	router.HandleFunc("GET /ui/api/alert-events", withSecurityHeaders(requireSession(sessionSigner, listAlertEventsHandler(logger, alertStore))))
 	router.HandleFunc("GET /{$}", withSecurityHeaders(http.RedirectHandler("/requests", http.StatusFound).ServeHTTP))
 	router.HandleFunc("GET /login", withSecurityHeaders(ui.PageHandler(logger, "login")))
+	router.HandleFunc("GET /requests", withSecurityHeaders(requireSessionPage(sessionSigner, ui.PageHandler(logger, "requests"))))
 	router.HandleFunc("GET /assets/", withSecurityHeaders(ui.AssetHandler()))
 	return router
 }
