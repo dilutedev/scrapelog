@@ -109,14 +109,15 @@ type Rule struct {
 }
 
 type compiledCondition struct {
-	field      string
-	name       string
-	operator   string
-	value      string
-	lowerBound uint64
-	upperBound uint64
-	classDigit uint16
-	pattern    *regexp.Regexp
+	field        string
+	name         string
+	operator     string
+	value        string
+	lowerBound   uint64
+	upperBound   uint64
+	classDigit   uint16
+	pattern      *regexp.Regexp
+	foldLiterals []foldLiteral
 }
 
 type CompiledRule struct {
@@ -206,12 +207,18 @@ func compileCondition(position int, condition Condition) (compiledCondition, err
 			return compiledCondition{}, fmt.Errorf("condition %d: invalid regex: %s", position, err)
 		}
 		compiled.pattern = pattern
+		if condition.Field == fieldBody {
+			compiled.foldLiterals = []foldLiteral{newFoldLiteral(condition.Value)}
+		}
 	case operatorRegex:
 		pattern, err := regexp.Compile(condition.Value)
 		if err != nil {
 			return compiledCondition{}, fmt.Errorf("condition %d: invalid regex: %s", position, err)
 		}
 		compiled.pattern = pattern
+		if condition.Field == fieldBody {
+			compiled.foldLiterals = foldLiteralsFromRegex(condition.Value)
+		}
 	default:
 		if spec.kind == kindNumber {
 			number, err := strconv.ParseUint(condition.Value, 10, spec.bits)

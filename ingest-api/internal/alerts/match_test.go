@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"bytes"
+	"math/rand/v2"
 	"strings"
 	"testing"
 	"time"
@@ -283,5 +284,96 @@ func TestMatchRespectsRuleProjectAndCopiesFields(t *testing.T) {
 	}
 	if _, matched := anyProject.Match(otherProject); !matched {
 		t.Fatal("rule without project must match every project")
+	}
+}
+
+func compileBodyCondition(t *testing.T, operator, value string) compiledCondition {
+	t.Helper()
+	compiled, err := compileCondition(1, Condition{Field: "body", Operator: operator, Value: value})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return compiled
+}
+
+func TestFoldLiteralSearchMatchesRegexp(t *testing.T) {
+	conditions := []struct {
+		operator string
+		value    string
+	}{
+		{"regex", "(?i)captcha|access denied"},
+		{"regex", "(?i)error"},
+		{"contains", "MiXeD Case"},
+		{"regex", "(?i)k"},
+		{"regex", "(?i)ſ"},
+		{"contains", "café ünï"},
+		{"regex", "(?i)denied|captcha"},
+	}
+	fixedBodies := []string{
+		"",
+		"captcha",
+		"CAPTCHA at the start",
+		"at the end: Access Denied",
+		"in the middle ACCESS denied here",
+		"cacaptcha",
+		"aaccess deniedd",
+		"mixed case",
+		"xx MIXED CASE xx",
+		"Kelvin \u212a and long s \u017f",
+		"k K \u212a",
+		"s \u017f S",
+		"CAFÉ ÜNÏ",
+		"caf\xc3 captcha",
+		"\xff\xfe error \xff",
+		strings.Repeat("x", maxBodyScanBytes) + "captcha",
+		strings.Repeat("x", maxBodyScanBytes-3) + "captcha",
+	}
+	alphabet := []string{"c", "a", "p", "t", "h", "A", "C", "k", "K", "\u212a", "s", "S", "\u017f", "e", "r", "o", " ", "d", "n", "i", "\xff", "\xc3", "é", "É", "x"}
+	randomSource := rand.New(rand.NewPCG(1, 2))
+	bodies := append([]string{}, fixedBodies...)
+	for count := 0; count < 2000; count++ {
+		var body strings.Builder
+		for position := randomSource.IntN(40); position > 0; position-- {
+			body.WriteString(alphabet[randomSource.IntN(len(alphabet))])
+		}
+		bodies = append(bodies, body.String())
+	}
+	for _, condition := range conditions {
+		compiled := compileBodyCondition(t, condition.operator, condition.value)
+		if compiled.foldLiterals == nil {
+			t.Fatalf("%s %q is not on the fold literal path", condition.operator, condition.value)
+		}
+		for _, body := range bodies {
+			scanned := []byte(body)[:min(len(body), maxBodyScanBytes)]
+			expectedLocation := compiled.pattern.FindIndex(scanned)
+			actualStart := foldLiteralsIndex(scanned, compiled.foldLiterals)
+			if (expectedLocation != nil) != (actualStart >= 0) || (expectedLocation != nil && expectedLocation[0] != actualStart) {
+				t.Fatalf("%s %q on %.60q: regexp %v, fold search %d", condition.operator, condition.value, body, expectedLocation, actualStart)
+			}
+		}
+	}
+}
+
+func TestCompileUsesFoldLiteralsOnlyForLiteralBodyConditions(t *testing.T) {
+	tests := map[string]struct {
+		condition Condition
+		expected  bool
+	}{
+		"literal alternation":    {Condition{Field: "body", Operator: "regex", Value: "(?i)captcha|access denied"}, true},
+		"body contains":          {Condition{Field: "body", Operator: "contains", Value: "error"}, true},
+		"body not contains":      {Condition{Field: "body", Operator: "not_contains", Value: "error"}, true},
+		"regex with wildcard":    {Condition{Field: "body", Operator: "regex", Value: "captcha.*denied"}, false},
+		"case sensitive literal": {Condition{Field: "body", Operator: "regex", Value: "captcha"}, false},
+		"factored alternation":   {Condition{Field: "body", Operator: "regex", Value: "(?i)abc|abd"}, false},
+		"url contains":           {Condition{Field: "url", Operator: "contains", Value: "error"}, false},
+	}
+	for name, test := range tests {
+		compiled, err := compileCondition(1, test.condition)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", name, err)
+		}
+		if (compiled.foldLiterals != nil) != test.expected {
+			t.Errorf("%s: fold literals present = %v, want %v", name, compiled.foldLiterals != nil, test.expected)
+		}
 	}
 }

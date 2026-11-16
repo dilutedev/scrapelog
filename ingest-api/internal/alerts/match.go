@@ -145,14 +145,19 @@ func (condition compiledCondition) matchKeyed(actual string, present bool) bool 
 
 func (condition compiledCondition) matchBody(body []byte) (bool, string) {
 	scanned := body[:min(len(body), maxBodyScanBytes)]
-	location := condition.pattern.FindIndex(scanned)
-	if condition.operator == operatorNotContains {
-		return location == nil, ""
+	matchStart := -1
+	if condition.foldLiterals != nil {
+		matchStart = foldLiteralsIndex(scanned, condition.foldLiterals)
+	} else if location := condition.pattern.FindIndex(scanned); location != nil {
+		matchStart = location[0]
 	}
-	if location == nil {
+	if condition.operator == operatorNotContains {
+		return matchStart < 0, ""
+	}
+	if matchStart < 0 {
 		return false, ""
 	}
-	snippetStart := max(0, location[0]-80)
-	snippetEnd := min(len(scanned), location[0]+120)
+	snippetStart := max(0, matchStart-80)
+	snippetEnd := min(len(scanned), matchStart+120)
 	return true, string(bytes.ToValidUTF8(scanned[snippetStart:snippetEnd], nil))
 }
