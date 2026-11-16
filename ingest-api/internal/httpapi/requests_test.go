@@ -93,7 +93,7 @@ func serveIngest(writer *fakeRecordWriter, loadedConfig config.Config, body io.R
 		request.Header.Set("Content-Encoding", contentEncoding)
 	}
 	recorder := httptest.NewRecorder()
-	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, loadedConfig).ServeHTTP(recorder, request)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, loadedConfig).ServeHTTP(recorder, request)
 	return recorder
 }
 
@@ -110,7 +110,7 @@ func (refresher *twoKeyRefresher) Authenticate(fullKey string) (apikeys.Identity
 
 func newRateLimitedHandler(writer *fakeRecordWriter, loadedConfig config.Config) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &twoKeyRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, loadedConfig)
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &twoKeyRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, loadedConfig)
 }
 
 func serveIngestWith(handler http.Handler, apiKey string, body io.Reader) *httptest.ResponseRecorder {
@@ -309,7 +309,7 @@ func TestIngestDoesNotLogRequestBodyContent(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer good-key")
 	recorder := httptest.NewRecorder()
 
-	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, bodyConfig).ServeHTTP(recorder, request)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, bodyConfig).ServeHTTP(recorder, request)
 
 	if strings.Contains(logOutput.String(), "secret-body-content") || strings.Contains(recorder.Body.String(), "secret-body-content") {
 		t.Fatalf("body content leaked: log %s response %s", logOutput.String(), recorder.Body.String())
@@ -450,7 +450,7 @@ func TestIngestInsertContextHasDeadline(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/v1/requests", strings.NewReader(recordsJSON(1)))
 	request.Header.Set("Authorization", "Bearer good-key")
 
-	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, deadlineWriter, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(httptest.NewRecorder(), request)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, deadlineWriter, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, testIngestConfig).ServeHTTP(httptest.NewRecorder(), request)
 
 	if !deadlineWriter.hadDeadline {
 		t.Fatal("insert context has no deadline")
@@ -475,7 +475,7 @@ func TestIngestRequiresAPIKeyBeforeReadingBody(t *testing.T) {
 		}
 		recorder := httptest.NewRecorder()
 
-		NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(recorder, request)
+		NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, testIngestConfig).ServeHTTP(recorder, request)
 
 		if recorder.Code != http.StatusUnauthorized {
 			t.Errorf("%s: status %d, want 401", name, recorder.Code)
@@ -485,7 +485,7 @@ func TestIngestRequiresAPIKeyBeforeReadingBody(t *testing.T) {
 
 func newGuardedHandler(writer *fakeRecordWriter, guard *fakeDiskGuard, logOutput io.Writer, loadedConfig config.Config) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(logOutput, nil))
-	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, guard, loadedConfig)
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, guard, &fakeRequestReader{}, nil, loadedConfig)
 }
 
 func TestIngestOverBudgetRejectsWithoutReadingBodyOrSpendingTokens(t *testing.T) {
@@ -534,7 +534,7 @@ func TestIngestNearBudgetInsertsAndLogsWarningOnce(t *testing.T) {
 func newBodyStoreHandler(writer *fakeRecordWriter, bodyStore BodyStore, guard DiskGuard, loadedConfig config.Config) http.Handler {
 	loadedConfig.MaxBodyBytes = 1024
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, bodyStore, &fakeStorageReporter{}, guard, loadedConfig)
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, bodyStore, &fakeStorageReporter{}, guard, &fakeRequestReader{}, nil, loadedConfig)
 }
 
 func TestIngestUploadsBodiesBeforeInsertAndReportsWarnings(t *testing.T) {

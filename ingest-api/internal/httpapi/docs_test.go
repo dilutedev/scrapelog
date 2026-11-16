@@ -19,7 +19,7 @@ func requestDocs(docsRequest *http.Request) *httptest.ResponseRecorder {
 func requestDocsWithConfig(docsRequest *http.Request, loadedConfig config.Config) *httptest.ResponseRecorder {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	recorder := httptest.NewRecorder()
-	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, loadedConfig).ServeHTTP(recorder, docsRequest)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, loadedConfig).ServeHTTP(recorder, docsRequest)
 	return recorder
 }
 

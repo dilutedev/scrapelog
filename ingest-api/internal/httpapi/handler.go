@@ -22,7 +22,7 @@ type KeyCache interface {
 	KeyRefresher
 }
 
-func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse ClickHousePinger, keyStore KeyStore, keyCache KeyCache, recordWriter RecordWriter, bodyStore BodyStore, storageReporter StorageReporter, diskGuard DiskGuard, loadedConfig config.Config) http.Handler {
+func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse ClickHousePinger, keyStore KeyStore, keyCache KeyCache, recordWriter RecordWriter, bodyStore BodyStore, storageReporter StorageReporter, diskGuard DiskGuard, requestReader RequestReader, bodyGetter BodyGetter, loadedConfig config.Config) http.Handler {
 	adminTokenHash := sha256.Sum256([]byte(loadedConfig.AdminToken))
 	recordLimiter := ratelimit.New(loadedConfig.RateLimitRecordsPerMinute, time.Now)
 	sessionSigner := session.New(loadedConfig.AdminToken, time.Now)
@@ -40,6 +40,11 @@ func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse
 	router.HandleFunc("POST /ui/api/login", withSecurityHeaders(requireSameOriginJSON(loginHandler(sessionSigner, adminTokenHash, loginLimiter))))
 	router.HandleFunc("POST /ui/api/logout", withSecurityHeaders(requireSameOriginJSON(logoutHandler())))
 	router.HandleFunc("GET /ui/api/session", withSecurityHeaders(sessionStatusHandler(sessionSigner)))
+	router.HandleFunc("GET /ui/api/requests", withSecurityHeaders(requireSession(sessionSigner, searchRequestsHandler(logger, requestReader))))
+	router.HandleFunc("GET /ui/api/request", withSecurityHeaders(requireSession(sessionSigner, requestDetailHandler(logger, requestReader))))
+	router.HandleFunc("GET /ui/api/request/body", withSecurityHeaders(requireSession(sessionSigner, requestBodyHandler(logger, requestReader, bodyGetter))))
+	router.HandleFunc("GET /ui/api/tape", withSecurityHeaders(requireSession(sessionSigner, tapeHandler(logger, requestReader))))
+	router.HandleFunc("GET /ui/api/facets", withSecurityHeaders(requireSession(sessionSigner, facetsHandler(logger, requestReader))))
 	router.HandleFunc("GET /{$}", withSecurityHeaders(http.RedirectHandler("/requests", http.StatusFound).ServeHTTP))
 	router.HandleFunc("GET /login", withSecurityHeaders(ui.PageHandler(logger, "login")))
 	router.HandleFunc("GET /assets/", withSecurityHeaders(ui.AssetHandler()))

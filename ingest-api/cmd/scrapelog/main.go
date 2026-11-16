@@ -18,6 +18,7 @@ import (
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/httpapi"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ingest"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/query"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/storage"
 )
 
@@ -67,6 +68,22 @@ func serve() int {
 	}
 	defer connection.Close()
 
+	readerOptions, err := clickhouse.ParseDSN(loadedConfig.ClickHouseURL)
+	if err != nil {
+		logger.Error("parsing clickhouse url failed", "error", err)
+		return 1
+	}
+	readerOptions.Auth.Database = loadedConfig.ClickHouseDatabase
+	readerOptions.Auth.Username = loadedConfig.ClickHouseReaderUser
+	readerOptions.Auth.Password = loadedConfig.ClickHouseReaderPassword
+
+	readerConnection, err := clickhouse.Open(readerOptions)
+	if err != nil {
+		logger.Error("opening clickhouse reader connection failed", "error", err)
+		return 1
+	}
+	defer readerConnection.Close()
+
 	signalContext, stopSignalHandling := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignalHandling()
 
@@ -89,9 +106,13 @@ func serve() int {
 		return 1
 	}
 	recordWriter := ingest.NewWriter(connection)
+	requestReader := query.NewReader(readerConnection)
 	var bodyUploader bodies.Uploader
+	var bodyGetter httpapi.BodyGetter
 	if loadedConfig.S3Endpoint != "" {
-		bodyUploader = bodies.NewS3Uploader(loadedConfig.S3Endpoint, loadedConfig.S3Bucket, loadedConfig.S3Region, loadedConfig.S3AccessKeyID, loadedConfig.S3SecretAccessKey)
+		s3Client := bodies.NewS3Uploader(loadedConfig.S3Endpoint, loadedConfig.S3Bucket, loadedConfig.S3Region, loadedConfig.S3AccessKeyID, loadedConfig.S3SecretAccessKey)
+		bodyUploader = s3Client
+		bodyGetter = s3Client
 	}
 	bodyStore := bodies.NewStore(bodyUploader, loadedConfig.S3BodyPrefix, logger)
 	go keyCache.RunRefreshLoop(signalContext, logger)
@@ -99,7 +120,7 @@ func serve() int {
 
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, loadedConfig),
+		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, requestReader, bodyGetter, loadedConfig),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
