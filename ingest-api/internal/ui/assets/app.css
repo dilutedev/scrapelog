@@ -204,6 +204,47 @@ body {
   cursor: pointer;
 }
 
+.export-menu {
+  position: relative;
+}
+
+.export-menu summary {
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.export-menu-panel {
+  position: absolute;
+  z-index: 5;
+  right: 0;
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 12rem;
+  padding: 0.5rem;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+}
+
+.export-menu-panel button {
+  font: inherit;
+  color: var(--ink);
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+
 #query-suggestions {
   position: absolute;
   z-index: 5;

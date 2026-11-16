@@ -23,21 +23,26 @@ import (
 )
 
 type fakeRequestReader struct {
-	searchRows     []query.RequestSummary
-	searchError    error
-	detail         query.RequestDetail
-	detailError    error
-	tapeBuckets    []query.TapeBucket
-	tapeError      error
-	facetValues    []query.FacetValue
-	facetError     error
-	bandwidthRows  []query.BandwidthRow
-	bandwidthError error
-	lastSearch     query.SearchRequest
-	lastDetail     query.RequestKey
-	lastTape       query.TapeRequest
-	lastFacets     query.FacetRequest
-	lastBandwidth  query.BandwidthRequest
+	searchRows       []query.RequestSummary
+	searchError      error
+	detail           query.RequestDetail
+	detailError      error
+	tapeBuckets      []query.TapeBucket
+	tapeError        error
+	facetValues      []query.FacetValue
+	facetError       error
+	bandwidthRows    []query.BandwidthRow
+	bandwidthError   error
+	lastSearch       query.SearchRequest
+	lastDetail       query.RequestKey
+	lastTape         query.TapeRequest
+	lastFacets       query.FacetRequest
+	lastBandwidth    query.BandwidthRequest
+	exportBody       string
+	exportStream     io.ReadCloser
+	exportError      error
+	lastExport       query.ExportRequest
+	lastExportFormat string
 }
 
 func (reader *fakeRequestReader) Search(ctx context.Context, searchRequest query.SearchRequest) ([]query.RequestSummary, error) {
@@ -63,6 +68,18 @@ func (reader *fakeRequestReader) Facets(ctx context.Context, facetRequest query.
 func (reader *fakeRequestReader) Bandwidth(ctx context.Context, bandwidthRequest query.BandwidthRequest) ([]query.BandwidthRow, error) {
 	reader.lastBandwidth = bandwidthRequest
 	return reader.bandwidthRows, reader.bandwidthError
+}
+
+func (reader *fakeRequestReader) Export(ctx context.Context, exportRequest query.ExportRequest, format string) (io.ReadCloser, error) {
+	reader.lastExport = exportRequest
+	reader.lastExportFormat = format
+	if reader.exportError != nil {
+		return nil, reader.exportError
+	}
+	if reader.exportStream != nil {
+		return reader.exportStream, nil
+	}
+	return io.NopCloser(strings.NewReader(reader.exportBody)), nil
 }
 
 type fakeBodyGetter struct {
@@ -111,7 +128,7 @@ func gzipText(t *testing.T, text string) []byte {
 }
 
 func TestUIRequestRoutesRequireSession(t *testing.T) {
-	for _, path := range []string{"/ui/api/requests", "/ui/api/request", "/ui/api/request/body", "/ui/api/tape", "/ui/api/facets", "/ui/api/bandwidth"} {
+	for _, path := range []string{"/ui/api/requests", "/ui/api/request", "/ui/api/request/body", "/ui/api/tape", "/ui/api/facets", "/ui/api/bandwidth", "/ui/api/requests/export?format=csv"} {
 		t.Run(path, func(t *testing.T) {
 			recorder := serve(newRequestsHandler(&fakeRequestReader{}, &fakeBodyGetter{}), httptest.NewRequest(http.MethodGet, path, nil))
 			if recorder.Code != http.StatusUnauthorized {

@@ -1,9 +1,11 @@
 package query
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -400,4 +402,37 @@ func (reader *Reader) Bandwidth(ctx context.Context, bandwidthRequest BandwidthR
 		return nil, classifyError(err)
 	}
 	return bandwidthRows, nil
+}
+
+type ExportRequest struct {
+	Filter Filter
+	From   time.Time
+	To     time.Time
+}
+
+const exportSelect = `SELECT received_at, ts, project, scraper, request_id, method, url, domain, status, latency_ms, proxy, http_version, tls_ja3, tls_ja4, tls_profile, request_headers, response_headers, response_size, body_key, request_body, request_body_encoding, error, tags
+FROM requests
+WHERE `
+
+const exportOrder = `
+ORDER BY ts DESC, request_id DESC
+LIMIT 100000`
+
+type bufferedReadCloser struct {
+	*bufio.Reader
+	io.Closer
+}
+
+func (reader *Reader) Export(ctx context.Context, exportRequest ExportRequest, format string) (io.ReadCloser, error) {
+	condition, args := rangeCondition(exportRequest.Filter, exportRequest.From, exportRequest.To)
+	stream, err := reader.connection.QueryFormat(ctx, format, exportSelect+condition+exportOrder, args...)
+	if err != nil {
+		return nil, classifyError(err)
+	}
+	bufferedStream := bufio.NewReader(stream)
+	if _, peekError := bufferedStream.Peek(1); peekError != nil && peekError != io.EOF {
+		stream.Close()
+		return nil, classifyError(peekError)
+	}
+	return bufferedReadCloser{Reader: bufferedStream, Closer: stream}, nil
 }

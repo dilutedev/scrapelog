@@ -24,6 +24,7 @@ type RequestReader interface {
 	Tape(ctx context.Context, tapeRequest query.TapeRequest) ([]query.TapeBucket, error)
 	Facets(ctx context.Context, facetRequest query.FacetRequest) ([]query.FacetValue, error)
 	Bandwidth(ctx context.Context, bandwidthRequest query.BandwidthRequest) ([]query.BandwidthRow, error)
+	Export(ctx context.Context, exportRequest query.ExportRequest, format string) (io.ReadCloser, error)
 }
 
 type BodyGetter interface {

@@ -41,6 +41,7 @@ func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse
 	router.HandleFunc("POST /ui/api/logout", withSecurityHeaders(requireSameOriginJSON(logoutHandler())))
 	router.HandleFunc("GET /ui/api/session", withSecurityHeaders(sessionStatusHandler(sessionSigner)))
 	router.HandleFunc("GET /ui/api/requests", withSecurityHeaders(requireSession(sessionSigner, searchRequestsHandler(logger, requestReader))))
+	router.HandleFunc("GET /ui/api/requests/export", withSecurityHeaders(requireSession(sessionSigner, exportRequestsHandler(logger, requestReader))))
 	router.HandleFunc("GET /ui/api/request", withSecurityHeaders(requireSession(sessionSigner, requestDetailHandler(logger, requestReader))))
 	router.HandleFunc("GET /ui/api/request/body", withSecurityHeaders(requireSession(sessionSigner, requestBodyHandler(logger, requestReader, bodyGetter))))
 	router.HandleFunc("GET /ui/api/tape", withSecurityHeaders(requireSession(sessionSigner, tapeHandler(logger, requestReader))))

@@ -29,6 +29,14 @@
 <option value="custom" hidden>Custom range</option>
 </select>
 <button type="submit">Search</button>
+<details class="export-menu">
+<summary>Download</summary>
+<div class="export-menu-panel">
+<button type="button" data-export-format="ndjson">NDJSON</button>
+<button type="button" data-export-format="csv">CSV</button>
+<p class="note">Newest 100,000 rows at most.</p>
+</div>
+</details>
 </form>
 <p id="query-error" class="query-error" role="alert" hidden></p>
 <section class="tape" aria-label="Status share over time">

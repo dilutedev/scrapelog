@@ -1,4 +1,4 @@
-import { apiFetch } from "./shell.js";
+import { apiFetch, networkErrorMessage } from "./shell.js";
 import { addQueryTerm, attachFacetAutocomplete, canFilter, formatQueryTerm } from "./requests-query.js";
 import { renderTape } from "./requests-tape.js";
 import { showRequestDetail } from "./requests-detail.js";
@@ -8,6 +8,7 @@ const defaultPreset = "1h";
 const pathTailLength = 24;
 
 const queryForm = document.getElementById("query-form");
+const exportMenu = document.querySelector(".export-menu");
 const queryInput = document.getElementById("query-input");
 const rangeSelect = document.getElementById("range-select");
 const customOption = rangeSelect.querySelector('option[value="custom"]');
@@ -331,6 +332,66 @@ rangeSelect.addEventListener("change", () => {
     syncRangeSelect();
     queryText = queryInput.value.trim();
     runSearch({ push: true });
+  }
+});
+
+async function downloadExport(formatName) {
+  const exportParameters = new URLSearchParams({ ...rangeParameters(), format: formatName });
+  if (queryText) {
+    exportParameters.set("q", queryText);
+  }
+  const exportButtons = exportMenu.querySelectorAll("[data-export-format]");
+  exportMenu.open = false;
+  queryError.hidden = true;
+  exportButtons.forEach((exportButton) => {
+    exportButton.disabled = true;
+  });
+  try {
+    let exportResponse;
+    try {
+      exportResponse = await fetch("/ui/api/requests/export?" + exportParameters);
+    } catch {
+      showQueryError(networkErrorMessage);
+      return;
+    }
+    if (exportResponse.status === 401) {
+      location.assign("/login?next=" + encodeURIComponent(location.pathname + location.search));
+      return;
+    }
+    if (!exportResponse.ok) {
+      let errorMessage = "";
+      try {
+        const errorBody = await exportResponse.json();
+        errorMessage = errorBody && errorBody.error;
+      } catch {}
+      showQueryError(errorMessage || `Request failed with status ${exportResponse.status}.`);
+      return;
+    }
+    let fileBlob;
+    try {
+      fileBlob = await exportResponse.blob();
+    } catch {
+      showQueryError("The export stopped before it finished. Try a narrower time range or query.");
+      return;
+    }
+    const fileNameMatch = /filename="([^"]+)"/.exec(exportResponse.headers.get("Content-Disposition") || "");
+    const objectUrl = URL.createObjectURL(fileBlob);
+    const downloadLink = document.createElement("a");
+    downloadLink.href = objectUrl;
+    downloadLink.download = fileNameMatch ? fileNameMatch[1] : "scrapelog-requests." + formatName;
+    downloadLink.click();
+    URL.revokeObjectURL(objectUrl);
+  } finally {
+    exportButtons.forEach((exportButton) => {
+      exportButton.disabled = false;
+    });
+  }
+}
+
+exportMenu.addEventListener("click", (clickEvent) => {
+  const formatName = clickEvent.target.closest("[data-export-format]")?.dataset.exportFormat;
+  if (formatName) {
+    downloadExport(formatName);
   }
 });
 
