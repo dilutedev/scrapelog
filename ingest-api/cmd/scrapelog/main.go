@@ -126,11 +126,12 @@ func serve() int {
 	cancelAlertStartup()
 	go keyCache.RunRefreshLoop(signalContext, logger)
 	go alertCache.RunRefreshLoop(signalContext, logger)
+	go alertDispatcher.Run()
 	go diskGuard.RunRefreshLoop(signalContext, logger)
 
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, requestReader, bodyGetter, alertStore, alertCache, alertDispatcher, loadedConfig),
+		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, requestReader, bodyGetter, alertStore, alertCache, alertDispatcher, alertCache, alertDispatcher, loadedConfig),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -153,8 +154,12 @@ func serve() int {
 	logger.Info("shutdown started")
 	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancelShutdown()
-	if err := server.Shutdown(shutdownContext); err != nil {
-		logger.Error("shutdown failed", "error", err)
+	serverShutdownError := server.Shutdown(shutdownContext)
+	dispatcherShutdownContext, cancelDispatcherShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelDispatcherShutdown()
+	alertDispatcher.Shutdown(dispatcherShutdownContext)
+	if serverShutdownError != nil {
+		logger.Error("shutdown failed", "error", serverShutdownError)
 		return 1
 	}
 	logger.Info("server stopped")

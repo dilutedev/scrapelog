@@ -33,6 +33,7 @@ services:
   ingest-api:
     build: ./ingest-api
     restart: unless-stopped
+    stop_grace_period: 15s
     environment:
       CLICKHOUSE_URL: ${CLICKHOUSE_URL:-}
       CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-}

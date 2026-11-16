@@ -22,7 +22,7 @@ type KeyCache interface {
 	KeyRefresher
 }
 
-func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse ClickHousePinger, keyStore KeyStore, keyCache KeyCache, recordWriter RecordWriter, bodyStore BodyStore, storageReporter StorageReporter, diskGuard DiskGuard, requestReader RequestReader, bodyGetter BodyGetter, alertStore AlertStore, alertRuleRefresher AlertRuleRefresher, alertTester AlertTester, loadedConfig config.Config) http.Handler {
+func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse ClickHousePinger, keyStore KeyStore, keyCache KeyCache, recordWriter RecordWriter, bodyStore BodyStore, storageReporter StorageReporter, diskGuard DiskGuard, requestReader RequestReader, bodyGetter BodyGetter, alertStore AlertStore, alertRuleRefresher AlertRuleRefresher, alertTester AlertTester, alertMatcher AlertMatcher, alertQueue AlertQueue, loadedConfig config.Config) http.Handler {
 	adminTokenHash := sha256.Sum256([]byte(loadedConfig.AdminToken))
 	recordLimiter := ratelimit.New(loadedConfig.RateLimitRecordsPerMinute, time.Now)
 	sessionSigner := session.New(loadedConfig.AdminToken, time.Now)
@@ -33,8 +33,8 @@ func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse
 	router.HandleFunc("POST /v1/admin/keys", requireAdmin(adminTokenHash, createKeyHandler(logger, keyStore, keyCache)))
 	router.HandleFunc("GET /v1/admin/keys", requireAdmin(adminTokenHash, listKeysHandler(logger, keyStore)))
 	router.HandleFunc("DELETE /v1/admin/keys/{key_id}", requireAdmin(adminTokenHash, revokeKeyHandler(logger, keyStore, keyCache)))
-	router.HandleFunc("POST /v1/requests", requireAPIKey(keyCache, ingestRequestsHandler(logger, recordWriter, bodyStore, recordLimiter, diskGuard, loadedConfig)))
-	router.HandleFunc("POST /v1/requests/stream", requireAPIKey(keyCache, streamRequestsHandler(logger, recordWriter, bodyStore, recordLimiter, diskGuard, shutdownContext, loadedConfig, streamFlushInterval)))
+	router.HandleFunc("POST /v1/requests", requireAPIKey(keyCache, ingestRequestsHandler(logger, recordWriter, bodyStore, alertMatcher, alertQueue, recordLimiter, diskGuard, loadedConfig)))
+	router.HandleFunc("POST /v1/requests/stream", requireAPIKey(keyCache, streamRequestsHandler(logger, recordWriter, bodyStore, alertMatcher, alertQueue, recordLimiter, diskGuard, shutdownContext, loadedConfig, streamFlushInterval)))
 	router.HandleFunc("GET /v1/stats", requireAPIKey(keyCache, statsHandler(logger, storageReporter)))
 	router.HandleFunc("GET /v1/admin/storage", requireAdmin(adminTokenHash, storageHandler(logger, storageReporter, uint64(loadedConfig.ClickHouseDiskBudgetBytes))))
 	router.HandleFunc("POST /ui/api/login", withSecurityHeaders(requireSameOriginJSON(loginHandler(sessionSigner, adminTokenHash, loginLimiter))))

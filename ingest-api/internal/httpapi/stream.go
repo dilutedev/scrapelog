@@ -67,7 +67,7 @@ func readStreamLines(contentEncoding string, body io.Reader, loadedConfig config
 	return scanner.Err()
 }
 
-func streamRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, bodyStore BodyStore, recordLimiter *ratelimit.Limiter, diskGuard DiskGuard, shutdownContext context.Context, loadedConfig config.Config, flushInterval time.Duration) func(http.ResponseWriter, *http.Request, apikeys.Identity) {
+func streamRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, bodyStore BodyStore, alertMatcher AlertMatcher, alertQueue AlertQueue, recordLimiter *ratelimit.Limiter, diskGuard DiskGuard, shutdownContext context.Context, loadedConfig config.Config, flushInterval time.Duration) func(http.ResponseWriter, *http.Request, apikeys.Identity) {
 	flushRecordLimit := min(streamFlushRecordLimit, loadedConfig.MaxBatchRecords)
 	flushByteLimit := int(decodedBodyMultiplier * loadedConfig.MaxRequestBytes)
 	return func(responseWriter http.ResponseWriter, request *http.Request, identity apikeys.Identity) {
@@ -106,6 +106,7 @@ func streamRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, bodyS
 				if usage.NearBudget() {
 					logger.Warn("clickhouse disk usage above 90% of budget", "used_bytes", usage.UsedBytes, "budget_bytes", usage.BudgetBytes)
 				}
+				pendingAlerts := alertMatcher.MatchRecords(recordsToInsert)
 				warningsToCommit = bodyStore.Store(context.WithoutCancel(request.Context()), recordsToInsert)
 				insertContext, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), insertTimeout)
 				defer cancel()
@@ -114,6 +115,7 @@ func streamRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, bodyS
 					responseWriter.Header().Set("Retry-After", insertRetryAfterSeconds)
 					return &streamFailure{http.StatusServiceUnavailable, "clickhouse unavailable"}
 				}
+				alertQueue.Enqueue(pendingAlerts)
 			}
 			committed.Accepted += len(recordsToInsert)
 			committed.Rejected += len(errorsToCommit)

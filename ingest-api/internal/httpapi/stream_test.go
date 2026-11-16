@@ -88,7 +88,7 @@ func newStreamHandlerWithBodyStore(writer RecordWriter, bodyStore BodyStore, gua
 	}
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	recordLimiter := ratelimit.New(loadedConfig.RateLimitRecordsPerMinute, time.Now)
-	return requireAPIKey(&fakeRefresher{}, streamRequestsHandler(logger, writer, bodyStore, recordLimiter, guard, shutdownContext, loadedConfig, flushInterval))
+	return requireAPIKey(&fakeRefresher{}, streamRequestsHandler(logger, writer, bodyStore, emptyAlertMatcher(), &fakeAlertQueue{}, recordLimiter, guard, shutdownContext, loadedConfig, flushInterval))
 }
 
 func serveStream(handler http.Handler, body io.Reader, contentEncoding string) *httptest.ResponseRecorder {
@@ -537,7 +537,7 @@ func TestStreamGuardsRunBeforeReadingBody(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	unauthenticated := httptest.NewRequest(http.MethodPost, "/v1/requests/stream", failingReader{t})
 	unauthenticatedRecorder := httptest.NewRecorder()
-	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, newChunkRecordingWriter(), &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, testIngestConfig).ServeHTTP(unauthenticatedRecorder, unauthenticated)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, newChunkRecordingWriter(), &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, testIngestConfig).ServeHTTP(unauthenticatedRecorder, unauthenticated)
 	if unauthenticatedRecorder.Code != http.StatusUnauthorized {
 		t.Fatalf("status %d, want 401", unauthenticatedRecorder.Code)
 	}
@@ -596,4 +596,65 @@ func TestStreamAndBatchShareOneRateLimitBucket(t *testing.T) {
 	serveIngestWith(handler, "good-key", strings.NewReader(recordsJSON(100)))
 
 	requireRateLimited(t, serveStream(handler, strings.NewReader(ndjsonLines(1)), ""))
+}
+
+func newStreamHandlerWithAlerts(writer RecordWriter, alertMatcher AlertMatcher, alertQueue AlertQueue, loadedConfig config.Config) http.Handler {
+	loadedConfig.MaxBodyBytes = 1024
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	recordLimiter := ratelimit.New(loadedConfig.RateLimitRecordsPerMinute, time.Now)
+	return requireAPIKey(&fakeRefresher{}, streamRequestsHandler(logger, writer, &fakeBodyStore{}, alertMatcher, alertQueue, recordLimiter, &fakeDiskGuard{}, context.Background(), loadedConfig, time.Hour))
+}
+
+func captchaBlockLines(count int) string {
+	var lines strings.Builder
+	for index := 0; index < count; index++ {
+		fmt.Fprintf(&lines, "{\"url\":\"https://example.com/%d\",\"method\":\"GET\",\"status\":403,\"body\":\"captcha\"}\n", index)
+	}
+	return lines.String()
+}
+
+func TestStreamEnqueuesMatchesAfterEachFlushInsert(t *testing.T) {
+	writer := newChunkRecordingWriter()
+	alertQueue := &fakeAlertQueue{insertCount: func() int { return len(writer.chunkSizes()) }}
+	handler := newStreamHandlerWithAlerts(writer, captchaBlockRuleMatcher(t), alertQueue, streamConfig(5))
+
+	recorder := serveStream(handler, strings.NewReader(captchaBlockLines(8)), "")
+
+	requireStatus(t, recorder, http.StatusOK)
+	requireChunkSizes(t, writer, 5, 3)
+	if len(alertQueue.enqueues) != 2 || len(alertQueue.enqueues[0]) != 5 || len(alertQueue.enqueues[1]) != 3 {
+		t.Fatalf("expected enqueues of 5 and 3 alerts, got %v", alertQueue.enqueues)
+	}
+	if alertQueue.insertsAtEnqueue[0] != 1 || alertQueue.insertsAtEnqueue[1] != 2 {
+		t.Fatalf("inserts at enqueue %v, want [1 2]", alertQueue.insertsAtEnqueue)
+	}
+}
+
+func TestStreamFailedInsertEnqueuesNothing(t *testing.T) {
+	writer := newChunkRecordingWriter()
+	writer.failOnCall = 1
+	alertQueue := &fakeAlertQueue{}
+	handler := newStreamHandlerWithAlerts(writer, captchaBlockRuleMatcher(t), alertQueue, streamConfig(5))
+
+	recorder := serveStream(handler, strings.NewReader(captchaBlockLines(5)), "")
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d, want 503, body %s", recorder.Code, recorder.Body.String())
+	}
+	if alertQueue.enqueuedAlertCount() != 0 {
+		t.Fatalf("expected no alerts, got %d", alertQueue.enqueuedAlertCount())
+	}
+}
+
+func TestStreamRecordsMatchingNoRuleEnqueueNothing(t *testing.T) {
+	writer := newChunkRecordingWriter()
+	alertQueue := &fakeAlertQueue{}
+	handler := newStreamHandlerWithAlerts(writer, captchaBlockRuleMatcher(t), alertQueue, streamConfig(5))
+
+	recorder := serveStream(handler, strings.NewReader(ndjsonLines(5)), "")
+
+	requireStatus(t, recorder, http.StatusOK)
+	if alertQueue.enqueuedAlertCount() != 0 {
+		t.Fatalf("expected no alerts, got %d", alertQueue.enqueuedAlertCount())
+	}
 }
