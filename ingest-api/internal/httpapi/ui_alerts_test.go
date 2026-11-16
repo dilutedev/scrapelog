@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -92,7 +93,22 @@ func (store *fakeAlertStore) ListEvents(ctx context.Context, ruleID string, limi
 
 func newAlertsHandler(store AlertStore, refresher AlertRuleRefresher) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, store, refresher, config.Config{AdminToken: testAdminToken})
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, store, refresher, nil, config.Config{AdminToken: testAdminToken})
+}
+
+type fakeAlertTester struct {
+	result   alerts.Delivery
+	lastRule alerts.Rule
+}
+
+func (tester *fakeAlertTester) SendTest(ctx context.Context, rule alerts.Rule) alerts.Delivery {
+	tester.lastRule = rule
+	return tester.result
+}
+
+func newAlertsHandlerWithTester(store AlertStore, tester AlertTester) http.Handler {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, store, &fakeRefresher{}, tester, config.Config{AdminToken: testAdminToken})
 }
 
 func alertRequest(method string, target string, body string) *http.Request {
@@ -128,6 +144,7 @@ func TestAlertRoutesRequireSession(t *testing.T) {
 		{http.MethodPut, "/ui/api/alert-rules/rule-1"},
 		{http.MethodDelete, "/ui/api/alert-rules/rule-1"},
 		{http.MethodGet, "/ui/api/alert-events"},
+		{http.MethodPost, "/ui/api/alert-rules/rule-1/test"},
 	}
 	for _, route := range routes {
 		t.Run(route.method+" "+route.path, func(t *testing.T) {
@@ -355,5 +372,53 @@ func TestAlertStoreErrorsReturnServiceUnavailable(t *testing.T) {
 				t.Fatalf("status %d, want 503", recorder.Code)
 			}
 		})
+	}
+}
+
+func TestTestAlertRuleReturnsDeliveryResult(t *testing.T) {
+	store := &fakeAlertStore{rules: []alerts.Rule{storedAlertRule()}}
+	tester := &fakeAlertTester{result: alerts.Delivery{Delivery: alerts.DeliveryFailed, StatusCode: 500, Error: "HTTP 500"}}
+	handler := newAlertsHandlerWithTester(store, tester)
+
+	recorder := serve(handler, alertRequest(http.MethodPost, "/ui/api/alert-rules/rule-1/test", ""))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if response["delivery"] != "failed" || response["status_code"] != float64(500) || response["delivery_error"] != "HTTP 500" {
+		t.Fatalf("unexpected response: %s", recorder.Body.String())
+	}
+	if tester.lastRule.RuleID != "rule-1" {
+		t.Fatalf("tester got rule %q", tester.lastRule.RuleID)
+	}
+
+	recorder = serve(handler, alertRequest(http.MethodPost, "/ui/api/alert-rules/missing/test", ""))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status %d, want 404", recorder.Code)
+	}
+}
+
+func TestTestAlertRuleNeverLeaksSecrets(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	closedAddress := listener.Addr().String()
+	listener.Close()
+	rule := storedAlertRule()
+	rule.DiscordWebhookURL = "http://" + closedAddress + "/webhook/SECRETMARKER7f3a"
+	store := &fakeAlertStore{rules: []alerts.Rule{rule}}
+	dispatcher := alerts.NewDispatcher(slog.New(slog.NewJSONHandler(io.Discard, nil)), nil, "")
+
+	recorder := serve(newAlertsHandlerWithTester(store, dispatcher), alertRequest(http.MethodPost, "/ui/api/alert-rules/rule-1/test", ""))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "SECRETMARKER7f3a") || !strings.Contains(recorder.Body.String(), "connection refused") {
+		t.Fatalf("unexpected response: %s", recorder.Body.String())
 	}
 }

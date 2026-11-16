@@ -33,6 +33,16 @@ type AlertRuleRefresher interface {
 	Refresh(ctx context.Context) error
 }
 
+type AlertTester interface {
+	SendTest(ctx context.Context, rule alerts.Rule) alerts.Delivery
+}
+
+type alertTestResponse struct {
+	Delivery      string `json:"delivery"`
+	StatusCode    int    `json:"status_code"`
+	DeliveryError string `json:"delivery_error"`
+}
+
 type alertRuleRequest struct {
 	Name              string             `json:"name"`
 	Project           string             `json:"project"`
@@ -223,6 +233,23 @@ func deleteAlertRuleHandler(logger *slog.Logger, store AlertStore, refresher Ale
 		}
 		refreshAlertRulesAfterWrite(logger, refresher, request)
 		responseWriter.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func testAlertRuleHandler(logger *slog.Logger, store AlertStore, tester AlertTester) http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, request *http.Request) {
+		rule, err := store.GetRule(request.Context(), request.PathValue("rule_id"))
+		if errors.Is(err, alerts.ErrRuleNotFound) {
+			writeError(responseWriter, http.StatusNotFound, "alert rule not found")
+			return
+		}
+		if err != nil {
+			logger.Error("loading alert rule for test failed", "error", err)
+			writeError(responseWriter, http.StatusServiceUnavailable, "clickhouse unavailable")
+			return
+		}
+		result := tester.SendTest(request.Context(), rule)
+		writeJSON(responseWriter, http.StatusOK, alertTestResponse{Delivery: result.Delivery, StatusCode: result.StatusCode, DeliveryError: result.Error})
 	}
 }
 

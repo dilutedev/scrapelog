@@ -118,6 +118,7 @@ func serve() int {
 	bodyStore := bodies.NewStore(bodyUploader, loadedConfig.S3BodyPrefix, logger)
 	alertStore := alerts.NewStore(connection)
 	alertCache := alerts.NewCache(alertStore)
+	alertDispatcher := alerts.NewDispatcher(logger, alertStore, loadedConfig.PublicURL)
 	alertStartupContext, cancelAlertStartup := context.WithTimeout(signalContext, 10*time.Second)
 	if err := alertCache.Refresh(alertStartupContext); err != nil {
 		logger.Error("loading alert rules failed", "error", err)
@@ -129,7 +130,7 @@ func serve() int {
 
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, requestReader, bodyGetter, alertStore, alertCache, loadedConfig),
+		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, requestReader, bodyGetter, alertStore, alertCache, alertDispatcher, loadedConfig),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
