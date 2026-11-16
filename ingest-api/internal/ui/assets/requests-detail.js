@@ -1,25 +1,11 @@
-import { apiFetch } from "./shell.js";
+import { apiFetch, formatBytes } from "./shell.js";
 import { canFilter, formatQueryTerm } from "./requests-query.js";
 
 const bodyDisplayCharacterLimit = 262144;
 const bodyDisplayLineLimit = 5000;
-const byteUnits = ["KiB", "MiB", "GiB"];
 
 let activeCallbacks = null;
 let activeRequestToken = "";
-
-export function formatBytes(byteCount) {
-  if (byteCount < 1024) {
-    return `${byteCount} B`;
-  }
-  let scaled = byteCount / 1024;
-  let unitIndex = 0;
-  while (scaled >= 1024 && unitIndex < byteUnits.length - 1) {
-    scaled /= 1024;
-    unitIndex += 1;
-  }
-  return `${scaled.toFixed(1)} ${byteUnits[unitIndex]}`;
-}
 
 function decodeRequestBody(detail) {
   if (detail.request_body_encoding !== "base64") {

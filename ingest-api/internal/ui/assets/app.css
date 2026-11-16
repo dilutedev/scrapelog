@@ -525,6 +525,100 @@ body {
   font-size: var(--size-small);
 }
 
+.bandwidth {
+  padding: 1rem 1.5rem;
+}
+
+.headline {
+  margin: 0 0 1rem;
+  font-size: var(--size-heading);
+  font-weight: 600;
+}
+
+.bandwidth-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.bandwidth-controls label {
+  color: var(--graphite);
+  font-size: var(--size-small);
+}
+
+.bandwidth-controls select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+}
+
+.bandwidth-chart {
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  padding: 0.5rem;
+  overflow: hidden;
+}
+
+.bandwidth-table {
+  width: 100%;
+  margin-top: 1rem;
+  border-collapse: collapse;
+  background: var(--sheet);
+}
+
+.bandwidth-table th,
+.bandwidth-table td {
+  padding: 0.375rem 0.5rem;
+  border-bottom: 1px solid var(--rule);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.bandwidth-table th:first-child,
+.bandwidth-table td:first-child {
+  text-align: left;
+}
+
+.bandwidth-table td:nth-child(n+2) {
+  font-family: var(--font-mono);
+}
+
+.group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0;
+  font: inherit;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.group-toggle[aria-pressed="true"] {
+  font-weight: 600;
+}
+
+.series-swatch {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 2px;
+}
+
+.share-bar {
+  display: inline-block;
+  max-width: 6rem;
+  height: 0.5rem;
+  margin-right: 0.5rem;
+  background: var(--graphite);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tape-svg,
   .detail-pane {
@@ -533,6 +627,19 @@ body {
 }
 
 @media (max-width: 759px) {
+  .bandwidth {
+    padding: 1rem;
+  }
+
+  .bandwidth-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .share-bar {
+    display: none;
+  }
+
   .explorer {
     padding: 1rem;
   }

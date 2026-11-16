@@ -131,3 +131,33 @@ func TestRequestsPageRendersWithSession(t *testing.T) {
 		}
 	}
 }
+
+func TestBandwidthPageRequiresSession(t *testing.T) {
+	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/bandwidth", ""))
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("status %d, want 302", recorder.Code)
+	}
+	wantLocation := "/login?next=" + url.QueryEscape("/bandwidth")
+	if location := recorder.Header().Get("Location"); location != wantLocation {
+		t.Fatalf("location %q, want %q", location, wantLocation)
+	}
+}
+
+func TestBandwidthPageRendersWithSession(t *testing.T) {
+	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/bandwidth", newTestSigner().Issue()))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", recorder.Code)
+	}
+	body := recorder.Body.String()
+	wantFragments := []string{"bandwidth.js", "shell.js", "vendor/uplot/uPlot.min.css", `href="/bandwidth" aria-current="page"`, `id="bandwidth-chart"`, `id="bandwidth-rows"`}
+	for _, fragment := range wantFragments {
+		if !strings.Contains(body, fragment) {
+			t.Fatalf("bandwidth page missing %q:\n%s", fragment, body)
+		}
+	}
+	for _, forbidden := range []string{"<script>", "style=", "onclick=", "onload="} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("bandwidth page contains inline %q", forbidden)
+		}
+	}
+}

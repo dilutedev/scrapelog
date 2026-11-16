@@ -10,6 +10,8 @@ document.getElementById("sign-out").addEventListener("click", async () => {
   } catch {}
 });
 
+const byteUnits = ["KiB", "MiB", "GiB", "TiB"];
+
 export const networkErrorMessage = "Couldn't reach the server. Check your connection and try again.";
 
 export async function apiFetch(path, options = {}) {
@@ -40,4 +42,17 @@ export async function apiFetch(path, options = {}) {
     return apiResponse.json();
   }
   return apiResponse.text();
+}
+
+export function formatBytes(byteCount) {
+  if (byteCount < 1024) {
+    return `${byteCount} B`;
+  }
+  let scaled = byteCount / 1024;
+  let unitIndex = 0;
+  while (scaled >= 1024 && unitIndex < byteUnits.length - 1) {
+    scaled /= 1024;
+    unitIndex += 1;
+  }
+  return `${scaled.toFixed(1)} ${byteUnits[unitIndex]}`;
 }
