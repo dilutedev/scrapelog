@@ -1,6 +1,6 @@
 # scrapelog
 
-scrapelog collects one row per HTTP request your scrapers make. Scrapers send records to an ingest API, the API stores them in ClickHouse, and Grafana shows dashboards and a request explorer on top. Everything runs from one Docker Compose file.
+scrapelog collects one row per HTTP request your scrapers make. Scrapers send records to an ingest API, the API stores them in ClickHouse, and the API also serves a web UI for searching requests, charting bandwidth and sending alerts. Everything runs from one Docker Compose file.
 
 ## Quickstart
 
@@ -11,7 +11,7 @@ cp .env.example .env
 openssl rand -base64 32
 ```
 
-   Run the second command once per empty value and paste the result: `CLICKHOUSE_ADMIN_PASSWORD`, `CLICKHOUSE_INGEST_PASSWORD`, `CLICKHOUSE_READER_PASSWORD`, `ADMIN_TOKEN` and `GRAFANA_ADMIN_PASSWORD`. Use `openssl rand -base64 32 | tr -d '\n/+='` to avoid characters that need quoting. `.env` is gitignored; never commit it.
+   Run the second command once per empty value and paste the result: `CLICKHOUSE_ADMIN_PASSWORD`, `CLICKHOUSE_INGEST_PASSWORD`, `CLICKHOUSE_READER_PASSWORD`, `CLICKHOUSE_ARCHIVER_PASSWORD` and `ADMIN_TOKEN`. Use `openssl rand -base64 32 | tr -d '\n/+='` to avoid characters that need quoting. `.env` is gitignored; never commit it.
 
 2. Start the stack and wait for every healthcheck:
 
@@ -26,19 +26,56 @@ docker compose exec ingest-api /scrapelog keys create --project my-project --nam
 ```
 
 4. Send data with one of the [examples](#examples), using the printed `key` as `SCRAPELOG_KEY`.
-5. Open Grafana at `http://127.0.0.1:3000` (or your `GRAFANA_PORT`) and log in as `admin`.
+5. Open the UI at `http://127.0.0.1:8080` (or your `INGEST_API_PORT`) and sign in with `ADMIN_TOKEN`. See [Web UI](#web-ui).
 
-Upgrades: v1 has no schema migrations. The ClickHouse init script in `clickhouse/initdb/` runs only when the data volume is empty, so a column added by a newer version (for example the request body columns) exists only in a freshly initialised volume. To pick up a schema change, take a [backup](#backups) if you need the data, then recreate the volume with `docker compose down -v && docker compose up -d --wait`. This deletes all stored requests and API keys.
+Upgrades: v1 has no schema migrations. The ClickHouse init script in `clickhouse/initdb/` runs only when the data volume is empty, so a column added by a newer version (for example the request body columns) exists only in a freshly initialised volume. To pick up a schema change, take a [backup](#backups) if you need the data, then recreate the volume with `docker compose down -v && docker compose up -d --wait`. This deletes all stored requests and API keys. To upgrade an install from before the web UI without losing data, follow [Upgrading an existing install](#upgrading-an-existing-install).
+
+## Upgrading an existing install
+
+1. Take a [backup](#backups).
+2. Pull the new version.
+3. Edit `.env`:
+   - Add `CLICKHOUSE_ARCHIVER_PASSWORD`. It is required; Compose refuses to start without it.
+   - Delete `GRAFANA_ADMIN_PASSWORD`, `GRAFANA_ROOT_URL` and `GRAFANA_PORT`.
+   - Optionally set `SCRAPELOG_PUBLIC_URL`.
+   - Make sure `S3_ENDPOINT` has no trailing slash.
+4. Recreate ClickHouse so it picks up the new environment, `config.d/archive-s3.xml` and `users.xml` (the `ui_reader` and `archiver` users; `grafana_reader` is removed):
+
+```
+docker compose up -d --wait --force-recreate clickhouse
+```
+
+5. Create the new tables. The files in `clickhouse/initdb/` run only on an empty volume, so apply them by hand, in order:
+
+```
+docker compose exec -T clickhouse clickhouse-client --multiquery < clickhouse/initdb/002_alerts.sql
+docker compose exec -T clickhouse clickhouse-client --multiquery < clickhouse/initdb/003_archive.sql
+docker compose exec -T clickhouse clickhouse-client --multiquery < clickhouse/initdb/004_restore.sql
+```
+
+   Each fails with "already exists" if that file was applied before; that is harmless.
+
+6. Rebuild the API and remove the old Grafana container:
+
+```
+docker compose up -d --build --remove-orphans --wait
+```
+
+7. Delete Grafana's data volume: `docker volume rm <project>_grafana_data`. The project is the directory name by default, so usually `scrapelog_grafana_data`.
+8. Update the reverse proxy to the single route in `deploy/examples/Caddyfile`, keeping `header_up X-Real-IP {client_ip}`, and add `/docs` to the Cloudflare Access bypass.
+9. If you later restore a database from a backup, re-create `requests_restored` (see [Restore](#restore)).
+
+The Grafana dashboards have no direct replacement panel for disk use, latency percentiles or top-error tables: use Requests filters, Bandwidth splits and `GET /v1/admin/storage`.
 
 ## Architecture
 
 - `clickhouse`: a single ClickHouse node. It publishes no host port and is reachable only on the `scrapelog` Docker network.
-- `ingest-api`: the Go HTTP API. It is published on `127.0.0.1:${INGEST_API_PORT:-8080}`.
-- `grafana`: Grafana OSS with the ClickHouse plugin, published on `127.0.0.1:${GRAFANA_PORT:-3000}`.
+- `ingest-api`: the Go HTTP API. It is published on `127.0.0.1:${INGEST_API_PORT:-8080}`. It also serves the web UI and `/docs`, and runs the alert dispatcher and the hourly archive job.
 - Host ports bind to loopback only. To expose them, put a reverse proxy in front (see [Cloudflare and reverse proxy](#cloudflare-and-reverse-proxy)).
 - ClickHouse users, all with passwords from `.env`:
-  - `ingest_writer` (used by `ingest-api`): can insert into and read `scrapelog.requests` and `scrapelog.api_keys`, and read `system.parts` for the storage measure.
-  - `grafana_reader` (used by Grafana): read-only on `scrapelog.requests` and `scrapelog.requests_hourly`.
+  - `ingest_writer` (used by `ingest-api`): can insert into and read `scrapelog.requests`, `scrapelog.api_keys`, `scrapelog.alert_rules` and `scrapelog.alert_events`, and read `system.parts` for the storage measure.
+  - `ui_reader` (used by the web UI): read-only on `scrapelog.requests`, `scrapelog.requests_hourly` and `scrapelog.requests_restored`, with a 60 s, 2 GB and 100,000-row limit per query.
+  - `archiver` (used by the archive and restore jobs): reads `scrapelog.requests`; writes `archive_days`, `requests_restored` and `archive_restores`; reads and writes S3 only under the bucket's `archive/requests/` prefix through the `archive_s3` named collection; each query is limited to 1 GiB, 2 threads and 900 s.
   - `scrapelog_admin`: full access, for operations such as [TTL changes](#ttl-tuning) and restores.
 
 ## Configuration
@@ -49,28 +86,28 @@ All configuration is environment variables in `.env`; Compose passes them to the
 | --- | --- | --- |
 | `CLICKHOUSE_ADMIN_PASSWORD` | none, required | Password of the `scrapelog_admin` user. |
 | `CLICKHOUSE_INGEST_PASSWORD` | none, required | Password of the `ingest_writer` user. |
-| `CLICKHOUSE_READER_PASSWORD` | none, required | Password of the `grafana_reader` and `ui_reader` users. |
+| `CLICKHOUSE_READER_PASSWORD` | none, required | Password of the `ui_reader` user. |
 | `CLICKHOUSE_URL` | `http://clickhouse:8123` | ClickHouse HTTP endpoint used by the API. |
 | `CLICKHOUSE_DATABASE` | `scrapelog` | Database name. |
 | `CLICKHOUSE_INGEST_USER` | `ingest_writer` | ClickHouse user of the API. |
 | `CLICKHOUSE_READER_USER` | `ui_reader` | ClickHouse user the UI reads with. |
+| `CLICKHOUSE_ARCHIVER_PASSWORD` | none, required | Password of the `archiver` user. Required even without S3. |
+| `CLICKHOUSE_ARCHIVER_USER` | `archiver` | ClickHouse user of the archive and restore jobs. |
 | `CLICKHOUSE_DISK_BUDGET_BYTES` | `25000000000` | Storage budget enforced by the API. See [Storage measure](#storage-measure). |
-| `ADMIN_TOKEN` | none, required | Bearer token for `/v1/admin/*` routes and the `keys` command. |
+| `ADMIN_TOKEN` | none, required | Bearer token for `/v1/admin/*` routes and the `keys` command. Also the UI sign-in token. |
+| `SCRAPELOG_PUBLIC_URL` | empty | Public base URL of the UI, for example `https://scrapelog.example.com`. Alert messages link back to it; empty leaves the link out. |
 | `MAX_BATCH_RECORDS` | `5000` | Maximum records per batch request. |
 | `RATE_LIMIT_RECORDS_PER_MINUTE` | `600000` | Per-key ingest limit in records per minute (10000 per second on average). Must be at least `MAX_BATCH_RECORDS`. |
 | `MAX_REQUEST_BYTES` | `10485760` | Maximum request size on the wire and, for the stream endpoint, the maximum size of one line. |
 | `MAX_BODY_BYTES` | `2097152` | Maximum size of a request body or response body after decoding. |
 | `REDACT_HEADERS` | `authorization,cookie,proxy-authorization` | Comma-separated header names to redact. See [Redaction](#redaction). |
-| `S3_ENDPOINT` | empty | S3-compatible endpoint (Cloudflare R2 or MinIO) for response bodies. Empty disables body storage. |
+| `S3_ENDPOINT` | empty | S3-compatible endpoint (Cloudflare R2 or MinIO) for response bodies and [archives](#archive). No trailing slash: with one, archiving is disabled and a warning is logged. Empty disables both. |
 | `S3_BUCKET` | empty | Bucket for response bodies. Required when `S3_ENDPOINT` is set. |
 | `S3_ACCESS_KEY_ID` | empty | Access key id. Required when `S3_ENDPOINT` is set. |
 | `S3_SECRET_ACCESS_KEY` | empty | Secret access key. Required when `S3_ENDPOINT` is set. |
 | `S3_REGION` | `auto` | Signing region (`auto` for R2). |
 | `S3_BODY_PREFIX` | `bodies/` | Object key prefix for response bodies. |
 | `INGEST_API_PORT` | `8080` | Host port of the ingest API (loopback). |
-| `GRAFANA_ADMIN_PASSWORD` | none, required | Password of the Grafana `admin` user. |
-| `GRAFANA_ROOT_URL` | `http://localhost:3000/` | Public URL Grafana is served from. |
-| `GRAFANA_PORT` | `3000` | Host port of Grafana (loopback). |
 | `BACKUP_S3_URL` | empty | Bucket base URL for [backups](#backups). |
 | `BACKUP_S3_ACCESS_KEY_ID` | empty | Access key id for backups. |
 | `BACKUP_S3_SECRET_ACCESS_KEY` | empty | Secret access key for backups. |
@@ -167,21 +204,75 @@ All need the admin token. The `scrapelog keys` command inside the `ingest-api` c
 - `REDACT_HEADERS` is matched case-insensitively against the names in both `request_headers` and `response_headers`; matching values are stored as `[REDACTED]`.
 - The default list (`authorization,cookie,proxy-authorization`) does not include `set-cookie`, so responses that set cookies are stored in full. If your scrapers send response headers, add it: `REDACT_HEADERS=authorization,cookie,proxy-authorization,set-cookie`. Setting the variable replaces the default list, it does not extend it.
 - Credentials in `url` (`https://user:pass@host/`) and in `proxy` are removed before storing.
-- Request bodies, response bodies, query strings and other header-like data in `tags` are not redacted. Anyone with Grafana access can read stored request bodies, so scrapers must not send secrets in bodies, URLs or tags.
+- Request bodies, response bodies, query strings and other header-like data in `tags` are not redacted. Anyone who can sign in to the UI can read stored request bodies, so scrapers must not send secrets in bodies, URLs or tags.
 
-## Grafana
+## Web UI
 
-- Log in at the Grafana URL as `admin` with the password in `GRAFANA_ADMIN_PASSWORD`.
-- Set `GRAFANA_ROOT_URL` to the public URL Grafana is served from.
-- Dashboards and the ClickHouse datasource are provisioned from `grafana/provisioning/` and are edited there, not in the UI.
-- The 25 GB budget on the storage gauge is set in `grafana/provisioning/dashboards/overview.json`. Keep it equal to `CLICKHOUSE_DISK_BUDGET_BYTES`, the budget the ingest API enforces.
-- Put Cloudflare Access in front of the Grafana hostname.
+### Sign in
+
+Open `/` (it redirects to `/requests`) and paste `ADMIN_TOKEN`. It is a single user. The session cookie lasts 7 days and is marked `Secure` behind HTTPS (`X-Forwarded-Proto: https`). Rotating `ADMIN_TOKEN` signs everyone out. Sign-in allows 10 attempts per minute per client address; see [Cloudflare and reverse proxy](#cloudflare-and-reverse-proxy) for why the proxy must set `X-Real-IP`.
+
+### Requests
+
+- A query bar, a time range (default the last hour), a status tape and a result list. Clicking a row opens its headers, request body and, when S3 is configured, its response body.
+- Terms are joined with AND. An unknown field returns an error that lists the valid ones.
+
+| Term | Matches |
+| --- | --- |
+| `project:` `scraper:` `domain:` `method:` `proxy:` `ja3:` `ja4:` | exact value |
+| `tls:` `http:` | `tls_profile` and `http_version`, exact value |
+| `status:` | `404`, `400..499` or `4xx` |
+| `latency:` `size:` | `>500`, `<500` or `100..500` (milliseconds and response bytes) |
+| `url~` `error~` | contains, case-insensitive |
+| `res.<header>` `req.<header>` | `:` exact, `~` contains |
+| `tag.<name>` | tag value, `:` exact, `~` contains |
+| `id:` | request id |
+| `-term` | negates a term |
+| `word`, `"quoted words"` | URL contains |
+
+- A bare word with a colon is read as `field:value`, so `http://shop.example.com` is the field `http`. Quote URLs: `"http://shop.example.com/p"`.
+- Successful rows expire after 14 days. For a range that starts earlier the list shows a note, and the status tape switches to the hourly rollup. The rollup can filter only on `status`, `project`, `scraper`, `domain`, `proxy` and `tls`; other terms are ignored by the tape, which is then marked approximate.
+- Download: the current query as NDJSON or CSV, the newest 100,000 rows at most. The browser holds the download in memory.
+
+### Bandwidth
+
+Bytes (`response_size`) and responses over time from `requests_hourly`, so history is kept after raw rows expire. Split by `proxy` (the default), `project`, `scraper` or `domain`, showing the top 8 plus "Other". Hourly or daily steps; the range is aligned to the step.
+
+### Alerts
+
+- A rule has a name, an optional project (empty means all), one or more conditions (all must match), a channel (Discord webhook, or Telegram bot token plus chat id) and a window from 10 to 3600 s (default 60).
+
+| Field | Operators |
+| --- | --- |
+| `status` | `equals`, `not_equals`, `between`, `greater_than`, `less_than`, `class` |
+| `latency_ms`, `response_size` | `equals`, `between`, `greater_than`, `less_than` |
+| `method`, `domain`, `scraper`, `proxy`, `tls_profile` | `equals`, `not_equals` |
+| `url`, `error`, `body` | `contains`, `not_contains`, `regex` |
+| `response_header`, `request_header`, `tag` (with a name) | `equals`, `contains`, `not_contains`, `regex`, `exists`, `missing` |
+
+- Text matching is case-insensitive except regex (use `(?i)`). Regex is Go RE2, checked on save.
+- The first match opens the window, and one message per window is sent with the match count and up to 3 samples. It carries an "Open in scrapelog" link when `SCRAPELOG_PUBLIC_URL` is set.
+- Only rows that were stored alert. Matching runs on ingest, so restored rows never alert.
+- Body conditions are checked last and scan the first 1 MiB of the decoded body, so a body between 1 MiB and `MAX_BODY_BYTES` (2 MiB) is only partly scanned. They work without S3.
+- Cost: contains and literal-alternation regexes are cheap. Other body regexes run inline in the ingest request at roughly 30-60 MB/s per core, so keep them for low-volume projects.
+- Up to 10,000 matches are queued; past that they are dropped and the next message says how many. A 429 from Discord or Telegram is retried once.
+- The Test button sends a sample message.
+- Sent and failed deliveries are listed under the rule and kept 30 days (`alert_events`).
+- Secrets at rest: webhook URLs and bot tokens are stored in plain text in `scrapelog.alert_rules` and so are in every backup. The API never returns them and they are never logged. Keep the backup bucket private.
+
+### Archive page
+
+Archived days and restores are on the Archive page; see [Archive](#archive).
+
+### Disk use
+
+The UI does not chart disk use. Use `GET /v1/admin/storage`.
 
 ## Request bodies
 
 - Records may carry `request_body` and `request_body_encoding` (`utf8`, the default, or `base64`). Base64 uses the standard alphabet and the size is measured after decoding.
 - A body larger than `MAX_BODY_BYTES` (default 2097152) rejects that record with an error; it is never truncated.
-- Bodies are stored verbatim and are visible to anyone with Grafana access, so scrapers must not put credentials in bodies. They are never logged.
+- Bodies are stored verbatim and are visible to anyone who can sign in to the UI, so scrapers must not put credentials in bodies. They are never logged.
 - The `request_body` columns exist only in a freshly initialised ClickHouse volume; recreate the volume to pick them up.
 
 ## Response bodies
@@ -196,9 +287,10 @@ All need the admin token. The `scrapelog keys` command inside the `ingest-api` c
 
 ## Cloudflare and reverse proxy
 
-`deploy/examples/Caddyfile` is an example of a Caddy site that sends `/v1/*` to the ingest API and everything else to Grafana, and passes the client address as `X-Real-IP`. Replace `clickhouse.example.com` with your hostname.
+`deploy/examples/Caddyfile` is an example of a Caddy site that sends the whole host to the ingest API (the API, `/docs` and the UI) and sets `X-Real-IP` to the client address. Replace `clickhouse.example.com` with your hostname.
 
-- Cloudflare Access protects the Grafana UI. It must not cover `/v1/*`: scrapers authenticate with API keys and cannot pass an Access login. Exclude `/v1/*` with a bypass policy, or serve the API on a separate hostname.
+- Keep `header_up X-Real-IP {client_ip}`. It overwrites any `X-Real-IP` the client sent. The sign-in rate limit keys on it; without it a client can choose its own address, bypass the limit and grow the limiter's memory. The API trusts the header because its port is bound to loopback, so only the proxy can reach it.
+- Cloudflare Access can protect the UI as a second login layer. It must not cover `/v1/*` or `/docs`: scrapers authenticate with API keys and cannot pass an Access login, and `/docs` is meant for scraper authors. Exclude both with a bypass policy, or serve the API on a separate hostname.
 - To make `{client_ip}` the real visitor address behind Cloudflare, Caddy must trust Cloudflare's proxy ranges. Caddy's `trusted_proxies cloudflare` source comes from the `caddy-cloudflare-ip` module, which is not in stock Caddy. With stock Caddy, add a global option listing Cloudflare's published ranges:
 
 ```
@@ -209,7 +301,6 @@ All need the admin token. The `scrapelog keys` command inside the `ingest-api` c
 }
 ```
 
-- The ingest API does not use the client address today; `X-Real-IP` is passed for your proxy logs and future use.
 - Cloudflare closes proxied requests after about 100 seconds; see [Streaming](#streaming).
 
 ## TTL tuning
@@ -220,18 +311,18 @@ All need the admin token. The `scrapelog keys` command inside the `ingest-api` c
 docker compose exec clickhouse sh -c 'clickhouse-client --user scrapelog_admin --password "$CLICKHOUSE_PASSWORD" --query "ALTER TABLE scrapelog.requests MODIFY TTL toDateTime(ts) + INTERVAL 7 DAY DELETE WHERE status BETWEEN 200 AND 399, toDateTime(ts) + INTERVAL 30 DAY DELETE"'
 ```
 
-Rules apply to existing rows after the change as ClickHouse rewrites the affected parts in the background. Update `clickhouse/initdb/001_schema.sql` to match so a recreated volume gets the same rules, and keep the bucket lifecycle rule for [response bodies](#response-bodies) in step. The `requests_hourly` aggregate is not subject to the TTL, so dashboards keep hourly history after raw rows expire.
+Rules apply to existing rows after the change as ClickHouse rewrites the affected parts in the background. Update `clickhouse/initdb/001_schema.sql` to match so a recreated volume gets the same rules, and keep the bucket lifecycle rule for [response bodies](#response-bodies) in step. The `requests_hourly` aggregate is not subject to the TTL, so Bandwidth keeps hourly history after raw rows expire.
 
 ## Storage measure
 
-The budget in `CLICKHOUSE_DISK_BUDGET_BYTES` counts the bytes of active parts (`system.parts`) in the `scrapelog` and `system` databases, so it includes ClickHouse's own logs as well as your data. The API refreshes the figure every 30 seconds, logs a warning above 90 percent and answers ingest requests with 507 above 100 percent. `GET /v1/admin/storage` and the storage gauge in Grafana show the same number; keep the gauge's budget in sync with the variable (see [Grafana](#grafana)).
+The budget in `CLICKHOUSE_DISK_BUDGET_BYTES` counts the bytes of active parts (`system.parts`) in the `scrapelog` and `system` databases, so it includes ClickHouse's own logs as well as your data. The API refreshes the figure every 30 seconds, logs a warning above 90 percent and answers ingest requests with 507 above 100 percent. `GET /v1/admin/storage` shows the same number. Restores are refused when they would take it past 80 percent; see [Archive](#archive).
 
 ## Backups
 
 - Set `BACKUP_S3_URL` (bucket base URL ending in `/`, for example `https://<account>.r2.cloudflarestorage.com/<bucket>/`), `BACKUP_S3_ACCESS_KEY_ID` and `BACKUP_S3_SECRET_ACCESS_KEY` in `.env`, then run `docker compose up -d clickhouse` to recreate ClickHouse with them.
 - `scripts/backup.sh` writes a full backup of the `scrapelog` database to `backups/scrapelog-<UTC timestamp>` in the bucket and exits non-zero on failure. Run it once by hand to check the credentials.
 - The S3 credentials live in a ClickHouse named collection (`clickhouse/config.d/backup-s3.xml`), so they never appear in the SQL statement, the query log or the command line.
-- The backup includes the `api_keys` hashes, so keep the bucket private.
+- The backup includes the `api_keys` hashes, so keep the bucket private. It skips `scrapelog.requests_restored`, which holds only temporary restored rows.
 - Schedule with cron:
 
 ```
@@ -269,7 +360,7 @@ WantedBy=timers.target
 
 This deletes the target's `scrapelog` database. Replace `<name>` with a name printed by the backup script, for example `backups/scrapelog-20261108T163416Z`.
 
-1. Deploy the stack on the target with the same `.env` (all passwords and `BACKUP_S3_*`) and run `docker compose up -d clickhouse`. The init script creates an empty `scrapelog` database. Stop `ingest-api` and `grafana` if they are running.
+1. Deploy the stack on the target with the same `.env` (all passwords and `BACKUP_S3_*`) and run `docker compose up -d clickhouse`. The init script creates an empty `scrapelog` database. Stop `ingest-api` if it is running.
 2. Drop the empty database:
 
 ```
@@ -282,9 +373,33 @@ docker compose exec -T clickhouse clickhouse-client --query "DROP DATABASE scrap
 docker compose exec -T clickhouse clickhouse-client --query "RESTORE DATABASE scrapelog FROM S3(backup_s3, filename = '<name>')" </dev/null
 ```
 
-4. Start everything: `docker compose up -d`.
+4. Re-create the restored-rows table, which backups skip:
 
-Restored API keys take effect once the API key cache expires (35 seconds). Users and grants come from `clickhouse/users.d/users.xml`, not from the backup.
+```
+sed -n '1,/;$/p' clickhouse/initdb/004_restore.sql | docker compose exec -T clickhouse clickhouse-client --multiquery
+```
+
+5. Start everything: `docker compose up -d`.
+
+Restored API keys take effect once the API key cache expires (35 seconds). Users and grants come from `clickhouse/users.d/users.xml`, not from the backup. Restores that were `ready` before the backup show no rows; delete them on the Archive page.
+
+## Archive
+
+- Raw `requests` rows are copied to S3 before the TTL deletes them, one Parquet file per UTC day at `<S3_BUCKET>/archive/requests/<YYYY-MM-DD>.parquet`.
+- It requires `S3_ENDPOINT` (no trailing slash), `S3_BUCKET` and the keys. The keys are also passed to the `clickhouse` container, which writes the files itself through the `archive_s3` named collection (`clickhouse/config.d/archive-s3.xml`). Without S3 the job does nothing and the Archive page says archiving is off.
+- Schedule: an hourly job inside `ingest-api`. Each day is archived once it is 2 days old, and again at 12 days to pick up late rows. The first run backfills to 58 days back: complete days first, then days already past the 14-day success TTL, which are archived as partial ("failures only") because their successful rows are gone.
+- Gap: rows that arrive more than 12 days late (ingest accepts up to 60), or after a day's second pass, are not archived.
+- Bodies are not archived. Archived rows keep `body_key`, which stops resolving once the `bodies/` lifecycle rule deletes the object.
+- Retention: archives are kept forever. To expire them, add a bucket lifecycle rule on the `archive/` prefix.
+- The Archive page lists archived days with row counts and partial flags, and downloads a day's Parquet file through the server.
+
+### Restoring an archived range
+
+- Pick a range, optionally a project and a domain. The page shows an estimate of rows and bytes first.
+- A range covers at most 31 days. A restore is refused if used bytes plus the estimate would exceed 80 percent of `CLICKHOUSE_DISK_BUDGET_BYTES`. ClickHouse stops each restore query after 900 s; restore a smaller range if it times out.
+- Restores run one at a time. Restored rows land in `scrapelog.requests_restored`, can be browsed in Requests by picking the restore, can be deleted on the Archive page, and expire after 7 days regardless.
+- They never feed `requests_hourly`, Bandwidth or alerts.
+- A failed or deleted restore leaves no rows.
 
 ## Examples
 
@@ -316,11 +431,12 @@ Revoked keys keep working for up to 35 seconds because of the key cache. The tes
 
 - The ingest API's direct dependencies are `clickhouse-go/v2`, `klauspost/compress` and `aws-sdk-go-v2` (`service/s3` and `credentials`).
 - `klauspost/compress` is used only to decode `Content-Encoding: zstd` request bodies, because Go's standard library has no zstd. It is already an indirect dependency of `clickhouse-go`.
+- The UI has no build step and no npm dependencies. It vendors uPlot (MIT, about 50 KB, no dependencies) for the Bandwidth chart, because hand-drawing a stacked, zoomable time-series chart is more code than the library. It also vendors the Atkinson Hyperlegible Next and Mono fonts (OFL, about 150 KB). Both are embedded in the binary under `ingest-api/internal/ui/assets/`.
 - `aws-sdk-go-v2` uploads response bodies to S3-compatible storage (Cloudflare R2, MinIO), which needs AWS Signature V4 request signing that the standard library does not provide.
 
 ## Integration test
 
 - Requires Docker with Compose v5 and network access to pull and build images. It needs no `.env`.
 - Run: `cd ingest-api && go test -tags integration -count=1 -timeout 15m ./integration/`
-- It starts its own isolated stack, ingests 1000 rows, checks project isolation and key revocation, greps the logs for secrets, then removes the stack and its volumes.
+- It starts its own isolated stack, ingests 1000 rows, checks project isolation and key revocation, signs in to the UI, searches, fires an alert rule at a local fake webhook and reads the event back, greps the logs for secrets, then removes the stack and its volumes.
 - Set `SCRAPELOG_IT_PORT` to choose the host port for the API; otherwise a free one is used. A plain `go test ./...` does not run it.

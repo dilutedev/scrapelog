@@ -76,7 +76,6 @@ func prepareStackEnvironment() error {
 		"CLICKHOUSE_READER_PASSWORD="+clickHousePasswords[2],
 		"CLICKHOUSE_ARCHIVER_PASSWORD="+clickHousePasswords[3],
 		"ADMIN_TOKEN="+adminToken,
-		"GRAFANA_ADMIN_PASSWORD="+randomHex(16),
 		"INGEST_API_PORT="+port,
 		"CLICKHOUSE_URL=http://clickhouse:8123",
 		"CLICKHOUSE_DATABASE=scrapelog",

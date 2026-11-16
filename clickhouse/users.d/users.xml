@@ -11,21 +11,6 @@
             <max_execution_time>900</max_execution_time>
             <output_format_parquet_row_group_size>100000</output_format_parquet_row_group_size>
         </archiver>
-        <grafana_reader>
-            <readonly>1</readonly>
-            <max_memory_usage>2147483648</max_memory_usage>
-            <max_execution_time>60</max_execution_time>
-            <max_bytes_before_external_group_by>1073741824</max_bytes_before_external_group_by>
-            <max_bytes_before_external_sort>1073741824</max_bytes_before_external_sort>
-            <max_result_rows>100000</max_result_rows>
-            <constraints>
-                <max_execution_time>
-                    <min>1</min>
-                    <max>60</max>
-                    <changeable_in_readonly/>
-                </max_execution_time>
-            </constraints>
-        </grafana_reader>
         <ui_reader>
             <readonly>1</readonly>
             <max_memory_usage>2147483648</max_memory_usage>
@@ -63,21 +48,6 @@
                 <query>GRANT SELECT ON system.parts</query>
             </grants>
         </ingest_writer>
-        <grafana_reader>
-            <password from_env="CLICKHOUSE_READER_PASSWORD"/>
-            <networks>
-                <ip>::/0</ip>
-            </networks>
-            <profile>grafana_reader</profile>
-            <quota>default</quota>
-            <grants>
-                <query>GRANT SELECT ON scrapelog.requests</query>
-                <query>GRANT SELECT ON scrapelog.requests_hourly</query>
-                <query>GRANT SHOW TABLES ON scrapelog.*</query>
-                <query>GRANT SHOW TABLES ON system.*</query>
-                <query>GRANT SELECT ON system.parts</query>
-            </grants>
-        </grafana_reader>
         <ui_reader>
             <password from_env="CLICKHOUSE_READER_PASSWORD"/>
             <networks>
