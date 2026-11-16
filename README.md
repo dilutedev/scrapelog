@@ -49,10 +49,11 @@ All configuration is environment variables in `.env`; Compose passes them to the
 | --- | --- | --- |
 | `CLICKHOUSE_ADMIN_PASSWORD` | none, required | Password of the `scrapelog_admin` user. |
 | `CLICKHOUSE_INGEST_PASSWORD` | none, required | Password of the `ingest_writer` user. |
-| `CLICKHOUSE_READER_PASSWORD` | none, required | Password of the `grafana_reader` user. |
+| `CLICKHOUSE_READER_PASSWORD` | none, required | Password of the `grafana_reader` and `ui_reader` users. |
 | `CLICKHOUSE_URL` | `http://clickhouse:8123` | ClickHouse HTTP endpoint used by the API. |
 | `CLICKHOUSE_DATABASE` | `scrapelog` | Database name. |
 | `CLICKHOUSE_INGEST_USER` | `ingest_writer` | ClickHouse user of the API. |
+| `CLICKHOUSE_READER_USER` | `ui_reader` | ClickHouse user the UI reads with. |
 | `CLICKHOUSE_DISK_BUDGET_BYTES` | `25000000000` | Storage budget enforced by the API. See [Storage measure](#storage-measure). |
 | `ADMIN_TOKEN` | none, required | Bearer token for `/v1/admin/*` routes and the `keys` command. |
 | `MAX_BATCH_RECORDS` | `5000` | Maximum records per batch request. |

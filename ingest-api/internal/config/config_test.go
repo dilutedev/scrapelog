@@ -10,7 +10,9 @@ func TestLoadAppliesDefaultsWhenOnlyPasswordIsSet(t *testing.T) {
 	t.Setenv("CLICKHOUSE_URL", "")
 	t.Setenv("CLICKHOUSE_DATABASE", "")
 	t.Setenv("CLICKHOUSE_INGEST_USER", "")
+	t.Setenv("CLICKHOUSE_READER_USER", "")
 	t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
+	t.Setenv("CLICKHOUSE_READER_PASSWORD", "reader-secret")
 	t.Setenv("ADMIN_TOKEN", "admin-secret")
 
 	loadedConfig, err := Load()
@@ -18,15 +20,17 @@ func TestLoadAppliesDefaultsWhenOnlyPasswordIsSet(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	expectedConfig := Config{
-		ClickHouseURL:      "http://clickhouse:8123",
-		ClickHouseDatabase: "scrapelog",
-		ClickHouseUser:     "ingest_writer",
-		ClickHousePassword: "secret",
-		AdminToken:         "admin-secret",
-		MaxBatchRecords:    5000,
-		MaxRequestBytes:    10485760,
-		MaxBodyBytes:       2097152,
-		RedactedHeaders:    map[string]bool{"authorization": true, "cookie": true, "proxy-authorization": true},
+		ClickHouseURL:            "http://clickhouse:8123",
+		ClickHouseDatabase:       "scrapelog",
+		ClickHouseUser:           "ingest_writer",
+		ClickHousePassword:       "secret",
+		ClickHouseReaderUser:     "ui_reader",
+		ClickHouseReaderPassword: "reader-secret",
+		AdminToken:               "admin-secret",
+		MaxBatchRecords:          5000,
+		MaxRequestBytes:          10485760,
+		MaxBodyBytes:             2097152,
+		RedactedHeaders:          map[string]bool{"authorization": true, "cookie": true, "proxy-authorization": true},
 
 		RateLimitRecordsPerMinute: 600000,
 
@@ -44,7 +48,9 @@ func TestLoadUsesProvidedValues(t *testing.T) {
 	t.Setenv("CLICKHOUSE_URL", "http://example:9000")
 	t.Setenv("CLICKHOUSE_DATABASE", "other")
 	t.Setenv("CLICKHOUSE_INGEST_USER", "writer")
+	t.Setenv("CLICKHOUSE_READER_USER", "viewer")
 	t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
+	t.Setenv("CLICKHOUSE_READER_PASSWORD", "reader-secret")
 	t.Setenv("ADMIN_TOKEN", "admin-secret")
 
 	loadedConfig, err := Load()
@@ -52,15 +58,17 @@ func TestLoadUsesProvidedValues(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	expectedConfig := Config{
-		ClickHouseURL:      "http://example:9000",
-		ClickHouseDatabase: "other",
-		ClickHouseUser:     "writer",
-		ClickHousePassword: "secret",
-		AdminToken:         "admin-secret",
-		MaxBatchRecords:    5000,
-		MaxRequestBytes:    10485760,
-		MaxBodyBytes:       2097152,
-		RedactedHeaders:    map[string]bool{"authorization": true, "cookie": true, "proxy-authorization": true},
+		ClickHouseURL:            "http://example:9000",
+		ClickHouseDatabase:       "other",
+		ClickHouseUser:           "writer",
+		ClickHousePassword:       "secret",
+		ClickHouseReaderUser:     "viewer",
+		ClickHouseReaderPassword: "reader-secret",
+		AdminToken:               "admin-secret",
+		MaxBatchRecords:          5000,
+		MaxRequestBytes:          10485760,
+		MaxBodyBytes:             2097152,
+		RedactedHeaders:          map[string]bool{"authorization": true, "cookie": true, "proxy-authorization": true},
 
 		RateLimitRecordsPerMinute: 600000,
 
@@ -84,8 +92,20 @@ func TestLoadRejectsEmptyPassword(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsEmptyReaderPassword(t *testing.T) {
+	t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
+	t.Setenv("CLICKHOUSE_READER_PASSWORD", "")
+	t.Setenv("ADMIN_TOKEN", "admin-secret")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "CLICKHOUSE_READER_PASSWORD") {
+		t.Fatalf("expected reader password error, got %v", err)
+	}
+}
+
 func TestLoadRejectsEmptyAdminToken(t *testing.T) {
 	t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
+	t.Setenv("CLICKHOUSE_READER_PASSWORD", "reader-secret")
 	t.Setenv("ADMIN_TOKEN", "")
 
 	_, err := Load()
@@ -96,6 +116,7 @@ func TestLoadRejectsEmptyAdminToken(t *testing.T) {
 
 func TestLoadRejectsInvalidLimits(t *testing.T) {
 	t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
+	t.Setenv("CLICKHOUSE_READER_PASSWORD", "reader-secret")
 	t.Setenv("ADMIN_TOKEN", "admin-secret")
 
 	for _, variableName := range []string{"MAX_BATCH_RECORDS", "MAX_REQUEST_BYTES", "MAX_BODY_BYTES"} {
@@ -115,6 +136,7 @@ func TestLoadRejectsInvalidLimits(t *testing.T) {
 
 func TestLoadParsesRedactedHeaders(t *testing.T) {
 	t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
+	t.Setenv("CLICKHOUSE_READER_PASSWORD", "reader-secret")
 	t.Setenv("ADMIN_TOKEN", "admin-secret")
 	t.Setenv("REDACT_HEADERS", " X-Api-Key , ,Cookie")
 
@@ -130,6 +152,7 @@ func TestLoadParsesRedactedHeaders(t *testing.T) {
 
 func TestLoadRateLimitRecordsPerMinute(t *testing.T) {
 	t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
+	t.Setenv("CLICKHOUSE_READER_PASSWORD", "reader-secret")
 	t.Setenv("ADMIN_TOKEN", "admin-secret")
 	t.Setenv("MAX_BATCH_RECORDS", "")
 	t.Setenv("MAX_REQUEST_BYTES", "")
@@ -155,6 +178,7 @@ func TestLoadRateLimitRecordsPerMinute(t *testing.T) {
 
 func TestLoadClickHouseDiskBudgetBytes(t *testing.T) {
 	t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
+	t.Setenv("CLICKHOUSE_READER_PASSWORD", "reader-secret")
 	t.Setenv("ADMIN_TOKEN", "admin-secret")
 
 	t.Setenv("CLICKHOUSE_DISK_BUDGET_BYTES", "")
@@ -179,6 +203,7 @@ func TestLoadClickHouseDiskBudgetBytes(t *testing.T) {
 
 func TestLoadMaxBodyBytes(t *testing.T) {
 	t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
+	t.Setenv("CLICKHOUSE_READER_PASSWORD", "reader-secret")
 	t.Setenv("ADMIN_TOKEN", "admin-secret")
 
 	t.Setenv("MAX_BODY_BYTES", "")
@@ -196,6 +221,7 @@ func TestLoadMaxBodyBytes(t *testing.T) {
 
 func TestLoadS3Settings(t *testing.T) {
 	t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
+	t.Setenv("CLICKHOUSE_READER_PASSWORD", "reader-secret")
 	t.Setenv("ADMIN_TOKEN", "admin-secret")
 	t.Setenv("S3_ENDPOINT", "http://seaweed:8333")
 	t.Setenv("S3_BUCKET", "scrapelog")
@@ -225,6 +251,7 @@ func TestLoadRejectsIncompleteS3Settings(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
+		t.Setenv("CLICKHOUSE_READER_PASSWORD", "reader-secret")
 		t.Setenv("ADMIN_TOKEN", "admin-secret")
 		t.Setenv("S3_ENDPOINT", "http://seaweed:8333")
 		t.Setenv("S3_BUCKET", test.bucket)
