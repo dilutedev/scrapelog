@@ -54,3 +54,22 @@ func (uploader *S3Uploader) Get(ctx context.Context, key string) ([]byte, error)
 	defer output.Body.Close()
 	return io.ReadAll(output.Body)
 }
+
+func (uploader *S3Uploader) Open(ctx context.Context, key string) (io.ReadCloser, int64, error) {
+	output, err := uploader.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(uploader.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		var noSuchKey *types.NoSuchKey
+		if errors.As(err, &noSuchKey) {
+			return nil, 0, ErrBodyNotFound
+		}
+		return nil, 0, err
+	}
+	contentLength := int64(-1)
+	if output.ContentLength != nil {
+		contentLength = *output.ContentLength
+	}
+	return output.Body, contentLength, nil
+}

@@ -128,10 +128,15 @@ func serve() int {
 	requestReader := query.NewReader(readerConnection)
 	var bodyUploader bodies.Uploader
 	var bodyGetter httpapi.BodyGetter
+	var archiveDownloader httpapi.ArchiveDownloader
+	archivingEnabled := loadedConfig.S3Endpoint != "" && !strings.HasSuffix(loadedConfig.S3Endpoint, "/")
 	if loadedConfig.S3Endpoint != "" {
 		s3Client := bodies.NewS3Uploader(loadedConfig.S3Endpoint, loadedConfig.S3Bucket, loadedConfig.S3Region, loadedConfig.S3AccessKeyID, loadedConfig.S3SecretAccessKey)
 		bodyUploader = s3Client
 		bodyGetter = s3Client
+		if archivingEnabled {
+			archiveDownloader = s3Client
+		}
 	}
 	bodyStore := bodies.NewStore(bodyUploader, loadedConfig.S3BodyPrefix, logger)
 	alertStore := alerts.NewStore(connection)
@@ -146,17 +151,18 @@ func serve() int {
 	go alertCache.RunRefreshLoop(signalContext, logger)
 	go alertDispatcher.Run()
 	go diskGuard.RunRefreshLoop(signalContext, logger)
-	if loadedConfig.S3Endpoint != "" {
-		if strings.HasSuffix(loadedConfig.S3Endpoint, "/") {
-			logger.Warn("archiving disabled: S3_ENDPOINT must not end with a slash")
-		} else {
-			go archive.NewArchiver(archiverConnection).Run(signalContext, logger)
-		}
+	var archiveLister httpapi.ArchiveLister
+	if archivingEnabled {
+		archiver := archive.NewArchiver(archiverConnection)
+		go archiver.Run(signalContext, logger)
+		archiveLister = archiver
+	} else if loadedConfig.S3Endpoint != "" {
+		logger.Warn("archiving disabled: S3_ENDPOINT must not end with a slash")
 	}
 
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, requestReader, bodyGetter, alertStore, alertCache, alertDispatcher, alertCache, alertDispatcher, loadedConfig),
+		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, requestReader, bodyGetter, alertStore, alertCache, alertDispatcher, alertCache, alertDispatcher, archivingEnabled, archiveLister, archiveDownloader, loadedConfig),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
