@@ -25,6 +25,11 @@ func bearerToken(request *http.Request) (string, bool) {
 	return token, token != ""
 }
 
+func adminTokenMatches(adminTokenHash [32]byte, token string) bool {
+	presentedHash := sha256.Sum256([]byte(token))
+	return subtle.ConstantTimeCompare(presentedHash[:], adminTokenHash[:]) == 1
+}
+
 func requireAdmin(adminTokenHash [32]byte, next http.HandlerFunc) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, request *http.Request) {
 		token, ok := bearerToken(request)
@@ -32,8 +37,7 @@ func requireAdmin(adminTokenHash [32]byte, next http.HandlerFunc) http.HandlerFu
 			writeUnauthorized(responseWriter)
 			return
 		}
-		presentedHash := sha256.Sum256([]byte(token))
-		if subtle.ConstantTimeCompare(presentedHash[:], adminTokenHash[:]) != 1 {
+		if !adminTokenMatches(adminTokenHash, token) {
 			writeUnauthorized(responseWriter)
 			return
 		}
