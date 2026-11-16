@@ -120,3 +120,28 @@ func TestScriptsUseNoHTMLSinks(t *testing.T) {
 		t.Fatalf("unexpected error: %v", walkError)
 	}
 }
+
+func TestVendoredUPlotIsServed(t *testing.T) {
+	tests := map[string]string{
+		"uPlot.esm.js":  "javascript",
+		"uPlot.min.css": "text/css",
+		"LICENSE":       "",
+	}
+	for fileName, expectedContentType := range tests {
+		t.Run(fileName, func(t *testing.T) {
+			recorder := serveAsset("/assets/" + assetVersion + "/vendor/uplot/" + fileName)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status %d, want 200", recorder.Code)
+			}
+			if !strings.Contains(recorder.Header().Get("Content-Type"), expectedContentType) {
+				t.Fatalf("content type %q, want it to contain %q", recorder.Header().Get("Content-Type"), expectedContentType)
+			}
+			if cacheControl := recorder.Header().Get("Cache-Control"); cacheControl != "public, max-age=31536000, immutable" {
+				t.Fatalf("cache control %q", cacheControl)
+			}
+			if recorder.Body.Len() == 0 {
+				t.Fatal("empty body")
+			}
+		})
+	}
+}
