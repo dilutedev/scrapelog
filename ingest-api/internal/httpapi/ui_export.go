@@ -42,7 +42,12 @@ func exportRequestsHandler(logger *slog.Logger, requestReader RequestReader) htt
 			writeError(responseWriter, http.StatusBadRequest, err.Error())
 			return
 		}
-		stream, err := requestReader.Export(request.Context(), query.ExportRequest{Filter: compiled.Raw, From: rangeStart, To: rangeEnd}, chosenFormat.clickHouseFormat)
+		restoreID, err := parseRestoreID(request)
+		if err != nil {
+			writeError(responseWriter, http.StatusBadRequest, err.Error())
+			return
+		}
+		stream, err := requestReader.Export(request.Context(), query.ExportRequest{Filter: compiled.Raw, From: rangeStart, To: rangeEnd, RestoreID: restoreID}, chosenFormat.clickHouseFormat)
 		if err != nil {
 			writeReaderError(logger, responseWriter, err, "exporting requests failed")
 			return

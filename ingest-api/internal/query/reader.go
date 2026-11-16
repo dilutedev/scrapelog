@@ -49,11 +49,12 @@ type Position struct {
 }
 
 type SearchRequest struct {
-	Filter Filter
-	From   time.Time
-	To     time.Time
-	After  *Position
-	Limit  int
+	Filter    Filter
+	From      time.Time
+	To        time.Time
+	After     *Position
+	Limit     int
+	RestoreID string
 }
 
 type RequestSummary struct {
@@ -77,6 +78,7 @@ type RequestKey struct {
 	Domain    string
 	Timestamp time.Time
 	RequestID string
+	RestoreID string
 }
 
 type RequestDetail struct {
@@ -112,6 +114,7 @@ type TapeRequest struct {
 	To          time.Time
 	StepSeconds int64
 	Hourly      bool
+	RestoreID   string
 }
 
 type TapeBucket struct {
@@ -124,10 +127,11 @@ type TapeBucket struct {
 }
 
 type FacetRequest struct {
-	Field  string
-	Prefix string
-	From   time.Time
-	To     time.Time
+	Field     string
+	Prefix    string
+	From      time.Time
+	To        time.Time
+	RestoreID string
 }
 
 type FacetValue struct {
@@ -143,6 +147,13 @@ func classifyError(err error) error {
 	return err
 }
 
+func sourceClause(restoreID string) (string, []any) {
+	if restoreID == "" {
+		return "FROM requests\nWHERE ", nil
+	}
+	return "FROM requests_restored\nWHERE restore_id = {restore_id:String} AND ", []any{clickhouse.Named("restore_id", restoreID)}
+}
+
 func rangeCondition(filter Filter, from time.Time, to time.Time) (string, []any) {
 	condition := "ts >= {range_from:DateTime64(3)} AND ts < {range_to:DateTime64(3)} AND (" + filter.Where + ")"
 	args := append([]any{}, filter.Args...)
@@ -151,8 +162,7 @@ func rangeCondition(filter Filter, from time.Time, to time.Time) (string, []any)
 }
 
 const searchSelect = `SELECT ts, project, scraper, request_id, method, url, domain, status, latency_ms, response_size, proxy, tls_profile, error
-FROM requests
-WHERE `
+`
 
 const searchCursorClause = `
   AND (ts < {after_ts:DateTime64(3)} OR (ts = {after_ts:DateTime64(3)} AND request_id < {after_request_id:String}))`
@@ -162,8 +172,10 @@ ORDER BY ts DESC, request_id DESC
 LIMIT {limit:UInt32}`
 
 func (reader *Reader) Search(ctx context.Context, searchRequest SearchRequest) ([]RequestSummary, error) {
+	source, sourceArgs := sourceClause(searchRequest.RestoreID)
 	condition, args := rangeCondition(searchRequest.Filter, searchRequest.From, searchRequest.To)
-	statement := searchSelect + condition
+	args = append(args, sourceArgs...)
+	statement := searchSelect + source + condition
 	if searchRequest.After != nil {
 		statement += searchCursorClause
 		args = append(args, clickhouse.Named("after_ts", searchRequest.After.Timestamp), clickhouse.Named("after_request_id", searchRequest.After.RequestID))
@@ -192,18 +204,22 @@ func (reader *Reader) Search(ctx context.Context, searchRequest SearchRequest) (
 	return summaries, nil
 }
 
-const detailQuery = `SELECT received_at, ts, project, scraper, request_id, method, url, domain, status, latency_ms, proxy, http_version, tls_ja3, tls_ja4, tls_profile, request_headers, response_headers, response_size, body_key, request_body, request_body_encoding, error, tags
-FROM requests
-WHERE project = {project:String} AND domain = {domain:String} AND ts = {ts:DateTime64(3)} AND request_id = {request_id:String}
+const detailSelect = `SELECT received_at, ts, project, scraper, request_id, method, url, domain, status, latency_ms, proxy, http_version, tls_ja3, tls_ja4, tls_profile, request_headers, response_headers, response_size, body_key, request_body, request_body_encoding, error, tags
+`
+
+const detailCondition = `project = {project:String} AND domain = {domain:String} AND ts = {ts:DateTime64(3)} AND request_id = {request_id:String}
 LIMIT 1`
 
 func (reader *Reader) Detail(ctx context.Context, key RequestKey) (RequestDetail, error) {
-	rows, err := reader.connection.Query(ctx, detailQuery,
+	source, sourceArgs := sourceClause(key.RestoreID)
+	args := []any{
 		clickhouse.Named("project", key.Project),
 		clickhouse.Named("domain", key.Domain),
 		clickhouse.Named("ts", key.Timestamp),
 		clickhouse.Named("request_id", key.RequestID),
-	)
+	}
+	args = append(args, sourceArgs...)
+	rows, err := reader.connection.Query(ctx, detailSelect+source+detailCondition, args...)
 	if err != nil {
 		return RequestDetail{}, classifyError(err)
 	}
@@ -228,8 +244,7 @@ func (reader *Reader) Detail(ctx context.Context, key RequestKey) (RequestDetail
 const rawTapeSelect = `SELECT intDiv(toUnixTimestamp(ts), {step_seconds:UInt32}) * {step_seconds:UInt32} AS bucket,
        countIf(status BETWEEN 200 AND 299), countIf(status BETWEEN 300 AND 399),
        countIf(status BETWEEN 400 AND 499), countIf(status BETWEEN 500 AND 599), countIf(status = 0)
-FROM requests
-WHERE `
+`
 
 const rawTapeGroup = `
 GROUP BY bucket ORDER BY bucket`
@@ -252,9 +267,11 @@ func (reader *Reader) Tape(ctx context.Context, tapeRequest TapeRequest) ([]Tape
 		args = append(args, tapeRequest.Filter.Args...)
 		args = append(args, clickhouse.Named("range_from", tapeRequest.From), clickhouse.Named("range_to", tapeRequest.To))
 	} else {
+		source, sourceArgs := sourceClause(tapeRequest.RestoreID)
 		var condition string
 		condition, args = rangeCondition(tapeRequest.Filter, tapeRequest.From, tapeRequest.To)
-		statement = rawTapeSelect + condition + rawTapeGroup
+		args = append(args, sourceArgs...)
+		statement = rawTapeSelect + source + condition + rawTapeGroup
 	}
 	args = append(args, clickhouse.Named("step_seconds", uint32(tapeRequest.StepSeconds)))
 
@@ -285,16 +302,18 @@ func (reader *Reader) Facets(ctx context.Context, facetRequest FacetRequest) ([]
 		return nil, ErrUnknownFacetField
 	}
 	column := facetRequest.Field
+	source, sourceArgs := sourceClause(facetRequest.RestoreID)
 	statement := "SELECT " + column + " AS value, count() AS requests\n" +
-		"FROM requests\n" +
-		"WHERE ts >= {range_from:DateTime64(3)} AND ts < {range_to:DateTime64(3)} AND " + column + " != '' AND startsWith(lower(" + column + "), lower({prefix:String}))\n" +
+		source + "ts >= {range_from:DateTime64(3)} AND ts < {range_to:DateTime64(3)} AND " + column + " != '' AND startsWith(lower(" + column + "), lower({prefix:String}))\n" +
 		"GROUP BY value ORDER BY requests DESC, value LIMIT 20"
 
-	rows, err := reader.connection.Query(ctx, statement,
+	args := []any{
 		clickhouse.Named("range_from", facetRequest.From),
 		clickhouse.Named("range_to", facetRequest.To),
 		clickhouse.Named("prefix", facetRequest.Prefix),
-	)
+	}
+	args = append(args, sourceArgs...)
+	rows, err := reader.connection.Query(ctx, statement, args...)
 	if err != nil {
 		return nil, classifyError(err)
 	}
@@ -405,14 +424,14 @@ func (reader *Reader) Bandwidth(ctx context.Context, bandwidthRequest BandwidthR
 }
 
 type ExportRequest struct {
-	Filter Filter
-	From   time.Time
-	To     time.Time
+	Filter    Filter
+	From      time.Time
+	To        time.Time
+	RestoreID string
 }
 
 const exportSelect = `SELECT received_at, ts, project, scraper, request_id, method, url, domain, status, latency_ms, proxy, http_version, tls_ja3, tls_ja4, tls_profile, request_headers, response_headers, response_size, body_key, request_body, request_body_encoding, error, tags
-FROM requests
-WHERE `
+`
 
 const exportOrder = `
 ORDER BY ts DESC, request_id DESC
@@ -424,8 +443,10 @@ type bufferedReadCloser struct {
 }
 
 func (reader *Reader) Export(ctx context.Context, exportRequest ExportRequest, format string) (io.ReadCloser, error) {
+	source, sourceArgs := sourceClause(exportRequest.RestoreID)
 	condition, args := rangeCondition(exportRequest.Filter, exportRequest.From, exportRequest.To)
-	stream, err := reader.connection.QueryFormat(ctx, format, exportSelect+condition+exportOrder, args...)
+	args = append(args, sourceArgs...)
+	stream, err := reader.connection.QueryFormat(ctx, format, exportSelect+source+condition+exportOrder, args...)
 	if err != nil {
 		return nil, classifyError(err)
 	}

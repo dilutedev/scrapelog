@@ -53,7 +53,7 @@ export function addQueryTerm(queryText, term) {
   return tokens.join(" ");
 }
 
-export function attachFacetAutocomplete(inputElement, listElement, currentRange) {
+export function attachFacetAutocomplete(inputElement, listElement, currentRange, currentSourceParameters) {
   let debounceTimer = null;
   let requestCounter = 0;
   let activeIndex = -1;
@@ -140,7 +140,7 @@ export function attachFacetAutocomplete(inputElement, listElement, currentRange)
     const { from, to } = currentRange();
     const facetField = token.fieldName === "tls" ? "tls_profile" : token.fieldName;
     try {
-      const facetResponse = await apiFetch("/ui/api/facets?" + new URLSearchParams({ field: facetField, prefix: token.prefix, from: from.toISOString(), to: to.toISOString() }));
+      const facetResponse = await apiFetch("/ui/api/facets?" + new URLSearchParams({ field: facetField, prefix: token.prefix, from: from.toISOString(), to: to.toISOString(), ...currentSourceParameters() }));
       if (thisRequest !== requestCounter) {
         return;
       }

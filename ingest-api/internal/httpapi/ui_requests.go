@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/dilutedev/scrapelog/ingest-api/internal/archive"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/bodies"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/query"
 )
@@ -168,6 +169,14 @@ func writeReaderError(logger *slog.Logger, responseWriter http.ResponseWriter, e
 	writeError(responseWriter, http.StatusServiceUnavailable, "clickhouse unavailable")
 }
 
+func parseRestoreID(request *http.Request) (string, error) {
+	restoreID := request.URL.Query().Get("restore_id")
+	if restoreID != "" && !archive.ValidRestoreID(restoreID) {
+		return "", errors.New("invalid restore id")
+	}
+	return restoreID, nil
+}
+
 func parseRequestKey(request *http.Request) (query.RequestKey, error) {
 	values := request.URL.Query()
 	project, domain, timestampText, requestID := values.Get("project"), values.Get("domain"), values.Get("ts"), values.Get("request_id")
@@ -178,7 +187,11 @@ func parseRequestKey(request *http.Request) (query.RequestKey, error) {
 	if err != nil {
 		return query.RequestKey{}, errors.New("ts must be an RFC 3339 time")
 	}
-	return query.RequestKey{Project: project, Domain: domain, Timestamp: timestamp, RequestID: requestID}, nil
+	restoreID, err := parseRestoreID(request)
+	if err != nil {
+		return query.RequestKey{}, err
+	}
+	return query.RequestKey{Project: project, Domain: domain, Timestamp: timestamp, RequestID: requestID, RestoreID: restoreID}, nil
 }
 
 func searchRequestsHandler(logger *slog.Logger, requestReader RequestReader) http.HandlerFunc {
@@ -203,7 +216,12 @@ func searchRequestsHandler(logger *slog.Logger, requestReader RequestReader) htt
 			}
 			limit = min(parsedLimit, maxSearchLimit)
 		}
-		searchRequest := query.SearchRequest{Filter: compiled.Raw, From: rangeStart, To: rangeEnd, Limit: limit + 1}
+		restoreID, err := parseRestoreID(request)
+		if err != nil {
+			writeError(responseWriter, http.StatusBadRequest, err.Error())
+			return
+		}
+		searchRequest := query.SearchRequest{Filter: compiled.Raw, From: rangeStart, To: rangeEnd, Limit: limit + 1, RestoreID: restoreID}
 		if cursorText := request.URL.Query().Get("cursor"); cursorText != "" {
 			position, err := decodeCursor(cursorText)
 			if err != nil {
@@ -224,7 +242,7 @@ func searchRequestsHandler(logger *slog.Logger, requestReader RequestReader) htt
 			nextCursor := encodeCursor(query.Position{Timestamp: rows[limit-1].Timestamp, RequestID: rows[limit-1].RequestID})
 			response.NextCursor = &nextCursor
 		}
-		if rangeStart.Before(now.Add(-rawRetention)) {
+		if restoreID == "" && rangeStart.Before(now.Add(-rawRetention)) {
 			response.Note = retentionNote
 		}
 		writeJSON(responseWriter, http.StatusOK, response)
@@ -320,11 +338,16 @@ func tapeHandler(logger *slog.Logger, requestReader RequestReader) http.HandlerF
 			writeError(responseWriter, http.StatusBadRequest, err.Error())
 			return
 		}
-		hourly := rangeStart.Before(now.Add(-rawRetention))
+		restoreID, err := parseRestoreID(request)
+		if err != nil {
+			writeError(responseWriter, http.StatusBadRequest, err.Error())
+			return
+		}
+		hourly := restoreID == "" && rangeStart.Before(now.Add(-rawRetention))
 		step := tapeStep(rangeEnd.Sub(rangeStart), hourly)
 		alignedStartSeconds := rangeStart.Unix() / step * step
 		alignedStart := time.Unix(alignedStartSeconds, 0).UTC()
-		tapeRequest := query.TapeRequest{Hourly: hourly, StepSeconds: step, To: rangeEnd}
+		tapeRequest := query.TapeRequest{Hourly: hourly, StepSeconds: step, To: rangeEnd, RestoreID: restoreID}
 		if hourly {
 			tapeRequest.Filter = compiled.Hourly
 			tapeRequest.From = alignedStart
@@ -359,11 +382,17 @@ func facetsHandler(logger *slog.Logger, requestReader RequestReader) http.Handle
 			writeError(responseWriter, http.StatusBadRequest, err.Error())
 			return
 		}
+		restoreID, err := parseRestoreID(request)
+		if err != nil {
+			writeError(responseWriter, http.StatusBadRequest, err.Error())
+			return
+		}
 		values, err := requestReader.Facets(request.Context(), query.FacetRequest{
-			Field:  request.URL.Query().Get("field"),
-			Prefix: request.URL.Query().Get("prefix"),
-			From:   rangeStart,
-			To:     rangeEnd,
+			Field:     request.URL.Query().Get("field"),
+			Prefix:    request.URL.Query().Get("prefix"),
+			From:      rangeStart,
+			To:        rangeEnd,
+			RestoreID: restoreID,
 		})
 		if errors.Is(err, query.ErrUnknownFacetField) {
 			writeError(responseWriter, http.StatusBadRequest, "field must be one of domain, scraper, project, proxy, tls_profile, method")

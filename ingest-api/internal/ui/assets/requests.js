@@ -10,6 +10,7 @@ const pathTailLength = 24;
 const queryForm = document.getElementById("query-form");
 const exportMenu = document.querySelector(".export-menu");
 const queryInput = document.getElementById("query-input");
+const sourceSelect = document.getElementById("source-select");
 const rangeSelect = document.getElementById("range-select");
 const customOption = rangeSelect.querySelector('option[value="custom"]');
 const queryError = document.getElementById("query-error");
@@ -24,6 +25,9 @@ const loadOlderButton = document.getElementById("load-older");
 const detailPane = document.getElementById("detail-pane");
 
 let queryText = "";
+let restoreId = "";
+let restoresById = new Map();
+let restoresLoaded = false;
 let rangeSelection = { preset: defaultPreset };
 let resolvedRange = null;
 let nextCursor = null;
@@ -36,6 +40,7 @@ const timeFormatter = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minu
 function readUrlState() {
   const urlParameters = new URLSearchParams(location.search);
   queryText = urlParameters.get("q") || "";
+  restoreId = urlParameters.get("restore_id") || "";
   const fromDate = new Date(urlParameters.get("from"));
   const toDate = new Date(urlParameters.get("to"));
   const requestedPreset = urlParameters.get("range");
@@ -48,6 +53,50 @@ function readUrlState() {
   }
   queryInput.value = queryText;
   syncRangeSelect();
+  syncSourceSelect();
+}
+
+function sourceParameters() {
+  return restoreId ? { restore_id: restoreId } : {};
+}
+
+function restoreLabel(restore) {
+  let label = `Restore: ${new Date(restore.from).toLocaleString()} – ${new Date(restore.to).toLocaleString()}`;
+  if (restore.project) {
+    label += `, ${restore.project}`;
+  }
+  if (restore.domain) {
+    label += `, ${restore.domain}`;
+  }
+  return label;
+}
+
+function syncSourceSelect() {
+  if (restoreId && !Array.from(sourceSelect.options).some((option) => option.value === restoreId)) {
+    const restoreOption = document.createElement("option");
+    restoreOption.value = restoreId;
+    const knownRestore = restoresById.get(restoreId);
+    restoreOption.textContent = knownRestore ? restoreLabel(knownRestore) : restoresLoaded ? "Restore (not available)" : "Restore";
+    sourceSelect.append(restoreOption);
+  }
+  sourceSelect.value = restoreId;
+  sourceSelect.hidden = sourceSelect.options.length <= 1;
+}
+
+async function loadRestores() {
+  let restoreList;
+  try {
+    restoreList = (await apiFetch("/ui/api/restores")).restores;
+  } catch {
+    return;
+  }
+  restoresLoaded = true;
+  restoresById = new Map(restoreList.filter((restore) => restore.status === "ready").map((restore) => [restore.restore_id, restore]));
+  sourceSelect.replaceChildren(new Option("Live", ""));
+  for (const restore of restoresById.values()) {
+    sourceSelect.append(new Option(restoreLabel(restore), restore.restore_id));
+  }
+  syncSourceSelect();
 }
 
 function syncRangeSelect() {
@@ -65,6 +114,9 @@ function writeUrlState(push) {
   const urlParameters = new URLSearchParams();
   if (queryText) {
     urlParameters.set("q", queryText);
+  }
+  if (restoreId) {
+    urlParameters.set("restore_id", restoreId);
   }
   if (rangeSelection.preset) {
     urlParameters.set("range", rangeSelection.preset);
@@ -220,7 +272,7 @@ async function runSearch({ push }) {
   resultsRows.parentElement.setAttribute("aria-busy", "true");
   resetDetailSelection();
 
-  const parameters = { q: queryText, ...rangeParameters() };
+  const parameters = { q: queryText, ...rangeParameters(), ...sourceParameters() };
   const [searchOutcome, tapeOutcome] = await Promise.allSettled([
     apiFetch("/ui/api/requests?" + new URLSearchParams(parameters)),
     apiFetch("/ui/api/tape?" + new URLSearchParams(parameters)),
@@ -271,7 +323,7 @@ async function loadOlder() {
   loadOlderButton.disabled = true;
   const thisSearch = searchSequence;
   try {
-    const page = await apiFetch("/ui/api/requests?" + new URLSearchParams({ q: queryText, ...rangeParameters(), cursor: nextCursor }));
+    const page = await apiFetch("/ui/api/requests?" + new URLSearchParams({ q: queryText, ...rangeParameters(), ...sourceParameters(), cursor: nextCursor }));
     if (thisSearch !== searchSequence) {
       return;
     }
@@ -297,7 +349,7 @@ function openRow(rowElement) {
   selectedRowElement = rowElement;
   rowElement.setAttribute("aria-selected", "true");
   rowElement.classList.add("selected");
-  showRequestDetail(detailPane, rows[Number(rowElement.dataset.rowIndex)], {
+  showRequestDetail(detailPane, rows[Number(rowElement.dataset.rowIndex)], sourceParameters(), {
     onFilter: applyTerm,
     onFindSimilar: (terms) => {
       queryText = terms.reduce(addQueryTerm, queryText);
@@ -335,8 +387,17 @@ rangeSelect.addEventListener("change", () => {
   }
 });
 
+sourceSelect.addEventListener("change", () => {
+  restoreId = sourceSelect.value;
+  const chosenRestore = restoresById.get(restoreId);
+  rangeSelection = chosenRestore ? { from: new Date(chosenRestore.from), to: new Date(chosenRestore.to) } : { preset: defaultPreset };
+  syncRangeSelect();
+  queryText = queryInput.value.trim();
+  runSearch({ push: true });
+});
+
 async function downloadExport(formatName) {
-  const exportParameters = new URLSearchParams({ ...rangeParameters(), format: formatName });
+  const exportParameters = new URLSearchParams({ ...rangeParameters(), ...sourceParameters(), format: formatName });
   if (queryText) {
     exportParameters.set("q", queryText);
   }
@@ -402,7 +463,8 @@ window.addEventListener("popstate", () => {
   runSearch({ push: false });
 });
 
-attachFacetAutocomplete(queryInput, document.getElementById("query-suggestions"), () => resolvedRange || resolveRange());
+attachFacetAutocomplete(queryInput, document.getElementById("query-suggestions"), () => resolvedRange || resolveRange(), sourceParameters);
 
 readUrlState();
+loadRestores();
 runSearch({ push: false });

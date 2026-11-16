@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/dilutedev/scrapelog/ingest-api/internal/bodies"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
@@ -705,5 +706,80 @@ func TestBandwidthReturnsEmptyArraysWithoutRows(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body %s lacks %s", body, want)
 		}
+	}
+}
+
+var restoreSourceRoutes = map[string]string{
+	"search": "/ui/api/requests?",
+	"detail": "/ui/api/request?project=acme&domain=shop.example.com&ts=2026-11-16T14:52:07.123Z&request_id=req-1&",
+	"body":   "/ui/api/request/body?project=acme&domain=shop.example.com&ts=2026-11-16T14:52:07.123Z&request_id=req-1&",
+	"tape":   "/ui/api/tape?",
+	"facets": "/ui/api/facets?field=domain&",
+	"export": "/ui/api/requests/export?format=csv&",
+}
+
+func TestRestoreIDIsPassedToReader(t *testing.T) {
+	restoreID := uuid.NewV7().String()
+	for name, route := range restoreSourceRoutes {
+		t.Run(name, func(t *testing.T) {
+			requestReader := &fakeRequestReader{detail: query.RequestDetail{BodyKey: "body-key"}}
+			recorder := getWithSession(newRequestsHandler(requestReader, &fakeBodyGetter{body: gzipText(t, "body")}), route+"restore_id="+restoreID)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status %d, want 200: %s", recorder.Code, recorder.Body.String())
+			}
+			gotRestoreIDs := map[string]string{
+				"search": requestReader.lastSearch.RestoreID,
+				"detail": requestReader.lastDetail.RestoreID,
+				"body":   requestReader.lastDetail.RestoreID,
+				"tape":   requestReader.lastTape.RestoreID,
+				"facets": requestReader.lastFacets.RestoreID,
+				"export": requestReader.lastExport.RestoreID,
+			}
+			if gotRestoreIDs[name] != restoreID {
+				t.Fatalf("reader restore id %q, want %q", gotRestoreIDs[name], restoreID)
+			}
+		})
+	}
+}
+
+func TestInvalidRestoreIDIsRejected(t *testing.T) {
+	invalidRestoreIDs := map[string]string{
+		"not a uuid": "not-a-uuid",
+		"uuid v4":    "3f2c1d4e-8b7a-4c9d-9e1f-0a1b2c3d4e5f",
+	}
+	for routeName, route := range restoreSourceRoutes {
+		for idName, invalidRestoreID := range invalidRestoreIDs {
+			t.Run(routeName+" "+idName, func(t *testing.T) {
+				requestReader := &fakeRequestReader{}
+				recorder := getWithSession(newRequestsHandler(requestReader, &fakeBodyGetter{}), route+"restore_id="+invalidRestoreID)
+				if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "invalid restore id") {
+					t.Fatalf("status %d body %s, want 400 invalid restore id", recorder.Code, recorder.Body.String())
+				}
+				if !reflect.DeepEqual(*requestReader, fakeRequestReader{}) {
+					t.Fatalf("reader was called: %+v", *requestReader)
+				}
+			})
+		}
+	}
+}
+
+func TestRestoreSourceUsesRawTapeWithoutNote(t *testing.T) {
+	restoreID := uuid.NewV7().String()
+	now := time.Now()
+	rangeQuery := timeRangeQuery(now.Add(-30*24*time.Hour), now) + "&restore_id=" + restoreID
+	requestReader := &fakeRequestReader{}
+	handler := newRequestsHandler(requestReader, nil)
+
+	tapeRecorder := getWithSession(handler, "/ui/api/tape?"+rangeQuery)
+	if tapeRecorder.Code != http.StatusOK || requestReader.lastTape.Hourly {
+		t.Fatalf("status %d, hourly %v, want 200 and raw tape", tapeRecorder.Code, requestReader.lastTape.Hourly)
+	}
+	if strings.Contains(tapeRecorder.Body.String(), "approximate") {
+		t.Fatalf("tape is approximate: %s", tapeRecorder.Body.String())
+	}
+
+	searchRecorder := getWithSession(handler, "/ui/api/requests?"+rangeQuery)
+	if searchRecorder.Code != http.StatusOK || strings.Contains(searchRecorder.Body.String(), "note") {
+		t.Fatalf("status %d body %s, want 200 without note", searchRecorder.Code, searchRecorder.Body.String())
 	}
 }

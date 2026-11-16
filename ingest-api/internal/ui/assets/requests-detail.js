@@ -145,8 +145,8 @@ function attachPaneListeners(paneElement) {
   });
 }
 
-export function showRequestDetail(paneElement, rowSummary, callbacks) {
-  const keyParameters = new URLSearchParams({ project: rowSummary.project, domain: rowSummary.domain, ts: rowSummary.ts, request_id: rowSummary.request_id });
+export function showRequestDetail(paneElement, rowSummary, sourceParameters, callbacks) {
+  const keyParameters = new URLSearchParams({ project: rowSummary.project, domain: rowSummary.domain, ts: rowSummary.ts, request_id: rowSummary.request_id, ...sourceParameters });
   const requestToken = keyParameters.toString();
   activeCallbacks = callbacks;
   activeRequestToken = requestToken;
