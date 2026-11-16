@@ -184,3 +184,15 @@ func (store *Store) ListEvents(ctx context.Context, ruleID string, limit int) ([
 	}
 	return events, nil
 }
+
+func (store *Store) InsertEvent(ctx context.Context, event Event) error {
+	batch, err := store.connection.PrepareBatch(ctx, "INSERT INTO alert_events (fired_at, rule_id, rule_name, project, match_count, dropped_count, samples, delivery, delivery_error)")
+	if err != nil {
+		return err
+	}
+	if err := batch.Append(event.FiredAt, event.RuleID, event.RuleName, event.Project, event.MatchCount, event.DroppedCount, event.Samples, event.Delivery, event.DeliveryError); err != nil {
+		batch.Abort()
+		return err
+	}
+	return batch.Send()
+}

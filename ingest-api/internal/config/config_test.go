@@ -52,6 +52,7 @@ func TestLoadUsesProvidedValues(t *testing.T) {
 	t.Setenv("CLICKHOUSE_INGEST_PASSWORD", "secret")
 	t.Setenv("CLICKHOUSE_READER_PASSWORD", "reader-secret")
 	t.Setenv("ADMIN_TOKEN", "admin-secret")
+	t.Setenv("SCRAPELOG_PUBLIC_URL", "https://logs.example.com/")
 
 	loadedConfig, err := Load()
 	if err != nil {
@@ -65,6 +66,7 @@ func TestLoadUsesProvidedValues(t *testing.T) {
 		ClickHouseReaderUser:     "viewer",
 		ClickHouseReaderPassword: "reader-secret",
 		AdminToken:               "admin-secret",
+		PublicURL:                "https://logs.example.com",
 		MaxBatchRecords:          5000,
 		MaxRequestBytes:          10485760,
 		MaxBodyBytes:             2097152,

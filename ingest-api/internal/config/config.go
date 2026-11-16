@@ -16,6 +16,7 @@ type Config struct {
 	ClickHouseReaderUser     string
 	ClickHouseReaderPassword string
 	AdminToken               string
+	PublicURL                string
 	MaxBatchRecords          int
 	MaxRequestBytes          int64
 	MaxBodyBytes             int64
@@ -42,6 +43,7 @@ func Load() (Config, error) {
 		ClickHouseReaderUser:     valueOrDefault("CLICKHOUSE_READER_USER", "ui_reader"),
 		ClickHouseReaderPassword: os.Getenv("CLICKHOUSE_READER_PASSWORD"),
 		AdminToken:               os.Getenv("ADMIN_TOKEN"),
+		PublicURL:                strings.TrimRight(os.Getenv("SCRAPELOG_PUBLIC_URL"), "/"),
 
 		S3Endpoint:        os.Getenv("S3_ENDPOINT"),
 		S3Bucket:          os.Getenv("S3_BUCKET"),
