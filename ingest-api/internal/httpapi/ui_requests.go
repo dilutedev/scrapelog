@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -22,6 +23,7 @@ type RequestReader interface {
 	Detail(ctx context.Context, key query.RequestKey) (query.RequestDetail, error)
 	Tape(ctx context.Context, tapeRequest query.TapeRequest) ([]query.TapeBucket, error)
 	Facets(ctx context.Context, facetRequest query.FacetRequest) ([]query.FacetValue, error)
+	Bandwidth(ctx context.Context, bandwidthRequest query.BandwidthRequest) ([]query.BandwidthRow, error)
 }
 
 type BodyGetter interface {
@@ -40,6 +42,9 @@ const (
 	retentionNote       = "Successful (2xx/3xx) requests are kept for 14 days; older results show only failures."
 	queryTimeoutMessage = "ClickHouse took longer than 60 s. Narrow the time range or add a domain filter."
 	bodyReadFailMessage = "reading the stored body failed"
+
+	maxBandwidthBuckets = 2400
+	otherGroupKey       = "Other"
 )
 
 var tapeStepLadder = []int64{1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400}
@@ -54,6 +59,27 @@ type tapeResponse struct {
 	StepSeconds int64              `json:"step_seconds"`
 	Buckets     []query.TapeBucket `json:"buckets"`
 	Approximate bool               `json:"approximate,omitempty"`
+}
+
+type bandwidthSeries struct {
+	Key    string     `json:"key"`
+	Points [][2]int64 `json:"points"`
+}
+
+type bandwidthGroup struct {
+	Key       string `json:"key"`
+	Bytes     uint64 `json:"bytes"`
+	Responses uint64 `json:"responses"`
+}
+
+type bandwidthResponse struct {
+	From           time.Time         `json:"from"`
+	To             time.Time         `json:"to"`
+	StepSeconds    int64             `json:"step_seconds"`
+	TotalBytes     uint64            `json:"total_bytes"`
+	TotalResponses uint64            `json:"total_responses"`
+	Series         []bandwidthSeries `json:"series"`
+	Groups         []bandwidthGroup  `json:"groups"`
 }
 
 type facetsResponse struct {
@@ -347,5 +373,113 @@ func facetsHandler(logger *slog.Logger, requestReader RequestReader) http.Handle
 			return
 		}
 		writeJSON(responseWriter, http.StatusOK, facetsResponse{Values: values})
+	}
+}
+
+type bandwidthAccumulator struct {
+	key            string
+	bytes          uint64
+	responses      uint64
+	bytesPerBucket []int64
+}
+
+func buildBandwidthResponse(rows []query.BandwidthRow, alignedFrom, alignedTo time.Time, stepSeconds int64) bandwidthResponse {
+	bucketCount := int((alignedTo.Unix() - alignedFrom.Unix()) / stepSeconds)
+	response := bandwidthResponse{From: alignedFrom, To: alignedTo, StepSeconds: stepSeconds, Series: []bandwidthSeries{}, Groups: []bandwidthGroup{}}
+
+	accumulatorsByKey := map[string]*bandwidthAccumulator{}
+	var otherAccumulator *bandwidthAccumulator
+	orderedAccumulators := []*bandwidthAccumulator{}
+	for _, row := range rows {
+		response.TotalBytes += row.Bytes
+		response.TotalResponses += row.Responses
+		var accumulator *bandwidthAccumulator
+		if row.Other {
+			if otherAccumulator == nil {
+				otherAccumulator = &bandwidthAccumulator{key: otherGroupKey, bytesPerBucket: make([]int64, bucketCount)}
+			}
+			accumulator = otherAccumulator
+		} else {
+			accumulator = accumulatorsByKey[row.Key]
+			if accumulator == nil {
+				accumulator = &bandwidthAccumulator{key: row.Key, bytesPerBucket: make([]int64, bucketCount)}
+				accumulatorsByKey[row.Key] = accumulator
+				orderedAccumulators = append(orderedAccumulators, accumulator)
+			}
+		}
+		accumulator.bytes += row.Bytes
+		accumulator.responses += row.Responses
+		bucketOffset := row.Start.Unix() - alignedFrom.Unix()
+		if bucketOffset >= 0 && bucketOffset/stepSeconds < int64(bucketCount) {
+			accumulator.bytesPerBucket[bucketOffset/stepSeconds] += int64(row.Bytes)
+		}
+	}
+	sort.Slice(orderedAccumulators, func(first, second int) bool {
+		if orderedAccumulators[first].bytes != orderedAccumulators[second].bytes {
+			return orderedAccumulators[first].bytes > orderedAccumulators[second].bytes
+		}
+		return orderedAccumulators[first].key < orderedAccumulators[second].key
+	})
+	if otherAccumulator != nil {
+		orderedAccumulators = append(orderedAccumulators, otherAccumulator)
+	}
+
+	for _, accumulator := range orderedAccumulators {
+		points := make([][2]int64, bucketCount)
+		for bucketIndex := range points {
+			points[bucketIndex] = [2]int64{alignedFrom.Unix() + int64(bucketIndex)*stepSeconds, accumulator.bytesPerBucket[bucketIndex]}
+		}
+		response.Series = append(response.Series, bandwidthSeries{Key: accumulator.key, Points: points})
+		response.Groups = append(response.Groups, bandwidthGroup{Key: accumulator.key, Bytes: accumulator.bytes, Responses: accumulator.responses})
+	}
+	return response
+}
+
+func bandwidthHandler(logger *slog.Logger, requestReader RequestReader) http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, request *http.Request) {
+		rangeStart, rangeEnd, err := parseTimeRange(request, time.Now())
+		if err != nil {
+			writeError(responseWriter, http.StatusBadRequest, err.Error())
+			return
+		}
+		var stepSeconds int64
+		switch request.URL.Query().Get("step") {
+		case "", "hour":
+			stepSeconds = hourSeconds
+		case "day":
+			stepSeconds = daySeconds
+		default:
+			writeError(responseWriter, http.StatusBadRequest, "step must be hour or day")
+			return
+		}
+		split := request.URL.Query().Get("split")
+		if split == "" {
+			split = "proxy"
+		}
+		alignedFromSeconds := rangeStart.Unix() / stepSeconds * stepSeconds
+		alignedToSeconds := (rangeEnd.Unix() + stepSeconds - 1) / stepSeconds * stepSeconds
+		if (alignedToSeconds-alignedFromSeconds)/stepSeconds > maxBandwidthBuckets {
+			writeError(responseWriter, http.StatusBadRequest, "the range has too many points; use step=day or a shorter range")
+			return
+		}
+		alignedFrom := time.Unix(alignedFromSeconds, 0).UTC()
+		alignedTo := time.Unix(alignedToSeconds, 0).UTC()
+
+		rows, err := requestReader.Bandwidth(request.Context(), query.BandwidthRequest{
+			Split:       split,
+			Project:     request.URL.Query().Get("project"),
+			From:        alignedFrom,
+			To:          alignedTo,
+			StepSeconds: stepSeconds,
+		})
+		if errors.Is(err, query.ErrUnknownBandwidthSplit) {
+			writeError(responseWriter, http.StatusBadRequest, "split must be one of project, scraper, domain, proxy")
+			return
+		}
+		if err != nil {
+			writeReaderError(logger, responseWriter, err, "reading bandwidth failed")
+			return
+		}
+		writeJSON(responseWriter, http.StatusOK, buildBandwidthResponse(rows, alignedFrom, alignedTo, stepSeconds))
 	}
 }

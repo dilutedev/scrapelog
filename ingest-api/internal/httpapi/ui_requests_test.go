@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,18 +23,21 @@ import (
 )
 
 type fakeRequestReader struct {
-	searchRows  []query.RequestSummary
-	searchError error
-	detail      query.RequestDetail
-	detailError error
-	tapeBuckets []query.TapeBucket
-	tapeError   error
-	facetValues []query.FacetValue
-	facetError  error
-	lastSearch  query.SearchRequest
-	lastDetail  query.RequestKey
-	lastTape    query.TapeRequest
-	lastFacets  query.FacetRequest
+	searchRows     []query.RequestSummary
+	searchError    error
+	detail         query.RequestDetail
+	detailError    error
+	tapeBuckets    []query.TapeBucket
+	tapeError      error
+	facetValues    []query.FacetValue
+	facetError     error
+	bandwidthRows  []query.BandwidthRow
+	bandwidthError error
+	lastSearch     query.SearchRequest
+	lastDetail     query.RequestKey
+	lastTape       query.TapeRequest
+	lastFacets     query.FacetRequest
+	lastBandwidth  query.BandwidthRequest
 }
 
 func (reader *fakeRequestReader) Search(ctx context.Context, searchRequest query.SearchRequest) ([]query.RequestSummary, error) {
@@ -54,6 +58,11 @@ func (reader *fakeRequestReader) Tape(ctx context.Context, tapeRequest query.Tap
 func (reader *fakeRequestReader) Facets(ctx context.Context, facetRequest query.FacetRequest) ([]query.FacetValue, error) {
 	reader.lastFacets = facetRequest
 	return reader.facetValues, reader.facetError
+}
+
+func (reader *fakeRequestReader) Bandwidth(ctx context.Context, bandwidthRequest query.BandwidthRequest) ([]query.BandwidthRow, error) {
+	reader.lastBandwidth = bandwidthRequest
+	return reader.bandwidthRows, reader.bandwidthError
 }
 
 type fakeBodyGetter struct {
@@ -102,7 +111,7 @@ func gzipText(t *testing.T, text string) []byte {
 }
 
 func TestUIRequestRoutesRequireSession(t *testing.T) {
-	for _, path := range []string{"/ui/api/requests", "/ui/api/request", "/ui/api/request/body", "/ui/api/tape", "/ui/api/facets"} {
+	for _, path := range []string{"/ui/api/requests", "/ui/api/request", "/ui/api/request/body", "/ui/api/tape", "/ui/api/facets", "/ui/api/bandwidth"} {
 		t.Run(path, func(t *testing.T) {
 			recorder := serve(newRequestsHandler(&fakeRequestReader{}, &fakeBodyGetter{}), httptest.NewRequest(http.MethodGet, path, nil))
 			if recorder.Code != http.StatusUnauthorized {
@@ -483,5 +492,201 @@ func TestFacetsPassesFieldAndPrefix(t *testing.T) {
 	requestReader.facetError = query.ErrUnknownFacetField
 	if recorder := getWithSession(handler, "/ui/api/facets?field=url"); recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400", recorder.Code)
+	}
+}
+
+type bandwidthTestResponse struct {
+	From           time.Time `json:"from"`
+	To             time.Time `json:"to"`
+	StepSeconds    int64     `json:"step_seconds"`
+	TotalBytes     uint64    `json:"total_bytes"`
+	TotalResponses uint64    `json:"total_responses"`
+	Series         []struct {
+		Key    string     `json:"key"`
+		Points [][2]int64 `json:"points"`
+	} `json:"series"`
+	Groups []struct {
+		Key       string `json:"key"`
+		Bytes     uint64 `json:"bytes"`
+		Responses uint64 `json:"responses"`
+	} `json:"groups"`
+}
+
+func getBandwidth(t *testing.T, requestReader *fakeRequestReader, target string) (*httptest.ResponseRecorder, bandwidthTestResponse) {
+	t.Helper()
+	recorder := getWithSession(newRequestsHandler(requestReader, nil), target)
+	var response bandwidthTestResponse
+	if recorder.Code == http.StatusOK {
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	return recorder, response
+}
+
+func bandwidthTarget(from string, to string, extra string) string {
+	return "/ui/api/bandwidth?from=" + url.QueryEscape(from) + "&to=" + url.QueryEscape(to) + extra
+}
+
+func TestBandwidthFoldsOtherAndSumsGroupsToTotal(t *testing.T) {
+	base := time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)
+	requestReader := &fakeRequestReader{bandwidthRows: []query.BandwidthRow{
+		{Start: base, Key: "small", Bytes: 10, Responses: 1},
+		{Start: base, Key: "", Bytes: 500, Responses: 5},
+		{Start: base, Other: true, Key: "", Bytes: 7, Responses: 2},
+		{Start: base.Add(time.Hour), Key: "big", Bytes: 900, Responses: 9},
+		{Start: base.Add(time.Hour), Key: "small", Bytes: 20, Responses: 2},
+		{Start: base.Add(time.Hour), Other: true, Key: "", Bytes: 3, Responses: 1},
+		{Start: base.Add(3 * time.Hour), Key: "Other", Bytes: 100, Responses: 4},
+		{Start: base.Add(3 * time.Hour), Other: true, Key: "", Bytes: 5, Responses: 1},
+	}}
+	recorder, response := getBandwidth(t, requestReader, bandwidthTarget("2026-11-16T10:00:00Z", "2026-11-16T14:00:00Z", ""))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", recorder.Code, recorder.Body.String())
+	}
+	wantKeys := []string{"big", "", "Other", "small", "Other"}
+	wantBytes := []uint64{900, 500, 100, 30, 15}
+	if len(response.Groups) != len(wantKeys) {
+		t.Fatalf("got %d groups, want %d", len(response.Groups), len(wantKeys))
+	}
+	var groupBytesSum, groupResponsesSum uint64
+	for index, group := range response.Groups {
+		if group.Key != wantKeys[index] || group.Bytes != wantBytes[index] {
+			t.Fatalf("group %d is %q/%d, want %q/%d", index, group.Key, group.Bytes, wantKeys[index], wantBytes[index])
+		}
+		if response.Series[index].Key != group.Key {
+			t.Fatalf("series %d key %q does not match group key %q", index, response.Series[index].Key, group.Key)
+		}
+		if len(response.Series[index].Points) != 4 {
+			t.Fatalf("series %d has %d points, want 4", index, len(response.Series[index].Points))
+		}
+		groupBytesSum += group.Bytes
+		groupResponsesSum += group.Responses
+	}
+	if groupBytesSum != response.TotalBytes || groupResponsesSum != response.TotalResponses {
+		t.Fatalf("groups sum to %d/%d, totals are %d/%d", groupBytesSum, groupResponsesSum, response.TotalBytes, response.TotalResponses)
+	}
+	if response.TotalBytes != 1545 || response.TotalResponses != 25 {
+		t.Fatalf("totals %d/%d, want 1545/25", response.TotalBytes, response.TotalResponses)
+	}
+	otherPoints := response.Series[4].Points
+	wantOtherBytes := []int64{7, 3, 0, 5}
+	for index, point := range otherPoints {
+		if point[0] != base.Add(time.Duration(index)*time.Hour).Unix() || point[1] != wantOtherBytes[index] {
+			t.Fatalf("other point %d is %v, want bytes %d", index, point, wantOtherBytes[index])
+		}
+	}
+}
+
+func TestBandwidthOmitsOtherWhenNoOtherRows(t *testing.T) {
+	base := time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)
+	requestReader := &fakeRequestReader{bandwidthRows: []query.BandwidthRow{{Start: base, Key: "only", Bytes: 5, Responses: 1}}}
+	_, response := getBandwidth(t, requestReader, bandwidthTarget("2026-11-16T10:00:00Z", "2026-11-16T11:00:00Z", ""))
+	if len(response.Groups) != 1 || response.Groups[0].Key != "only" {
+		t.Fatalf("groups %+v, want only the single key", response.Groups)
+	}
+}
+
+func TestBandwidthAlignsRangeToStep(t *testing.T) {
+	tests := map[string]struct {
+		from        string
+		to          string
+		step        string
+		wantFrom    string
+		wantTo      string
+		wantStep    int64
+		wantBuckets int
+	}{
+		"hour":            {from: "2026-11-16T10:20:00Z", to: "2026-11-16T13:05:00Z", step: "hour", wantFrom: "2026-11-16T10:00:00Z", wantTo: "2026-11-16T14:00:00Z", wantStep: 3600, wantBuckets: 4},
+		"day":             {from: "2026-11-09T05:00:00Z", to: "2026-11-11T01:00:00Z", step: "day", wantFrom: "2026-11-09T00:00:00Z", wantTo: "2026-11-12T00:00:00Z", wantStep: 86400, wantBuckets: 3},
+		"already aligned": {from: "2026-11-16T10:00:00Z", to: "2026-11-16T12:00:00Z", step: "hour", wantFrom: "2026-11-16T10:00:00Z", wantTo: "2026-11-16T12:00:00Z", wantStep: 3600, wantBuckets: 2},
+		"inside one hour": {from: "2026-11-16T10:10:00Z", to: "2026-11-16T10:20:00Z", step: "hour", wantFrom: "2026-11-16T10:00:00Z", wantTo: "2026-11-16T11:00:00Z", wantStep: 3600, wantBuckets: 1},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			requestReader := &fakeRequestReader{bandwidthRows: []query.BandwidthRow{{Start: time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC), Key: "a", Bytes: 1, Responses: 1}}}
+			recorder, response := getBandwidth(t, requestReader, bandwidthTarget(test.from, test.to, "&step="+test.step))
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status %d: %s", recorder.Code, recorder.Body.String())
+			}
+			wantFrom, _ := time.Parse(time.RFC3339, test.wantFrom)
+			wantTo, _ := time.Parse(time.RFC3339, test.wantTo)
+			if !response.From.Equal(wantFrom) || !response.To.Equal(wantTo) || response.StepSeconds != test.wantStep {
+				t.Fatalf("response range %v to %v step %d", response.From, response.To, response.StepSeconds)
+			}
+			last := requestReader.lastBandwidth
+			if !last.From.Equal(wantFrom) || !last.To.Equal(wantTo) || last.StepSeconds != test.wantStep {
+				t.Fatalf("reader range %v to %v step %d", last.From, last.To, last.StepSeconds)
+			}
+			if len(response.Series[0].Points) != test.wantBuckets {
+				t.Fatalf("got %d points, want %d", len(response.Series[0].Points), test.wantBuckets)
+			}
+		})
+	}
+}
+
+func TestBandwidthPassesSplitAndProject(t *testing.T) {
+	tests := map[string]struct {
+		extra       string
+		wantSplit   string
+		wantProject string
+	}{
+		"defaults":    {extra: "", wantSplit: "proxy", wantProject: ""},
+		"domain acme": {extra: "&split=domain&project=acme", wantSplit: "domain", wantProject: "acme"},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			requestReader := &fakeRequestReader{}
+			recorder, _ := getBandwidth(t, requestReader, bandwidthTarget("2026-11-16T10:00:00Z", "2026-11-16T12:00:00Z", test.extra))
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status %d: %s", recorder.Code, recorder.Body.String())
+			}
+			if requestReader.lastBandwidth.Split != test.wantSplit || requestReader.lastBandwidth.Project != test.wantProject {
+				t.Fatalf("reader got split %q project %q", requestReader.lastBandwidth.Split, requestReader.lastBandwidth.Project)
+			}
+		})
+	}
+}
+
+func TestBandwidthRejectsInvalidInput(t *testing.T) {
+	tests := map[string]struct {
+		target      string
+		reader      *fakeRequestReader
+		wantMessage string
+	}{
+		"unknown step":           {target: bandwidthTarget("2026-11-16T10:00:00Z", "2026-11-16T12:00:00Z", "&step=week"), reader: &fakeRequestReader{}, wantMessage: "step must be hour or day"},
+		"too many hourly points": {target: bandwidthTarget("2026-08-01T00:00:00Z", "2026-11-10T00:00:00Z", "&step=hour"), reader: &fakeRequestReader{}, wantMessage: "the range has too many points; use step=day or a shorter range"},
+		"unknown split":          {target: bandwidthTarget("2026-11-16T10:00:00Z", "2026-11-16T12:00:00Z", "&split=status"), reader: &fakeRequestReader{bandwidthError: query.ErrUnknownBandwidthSplit}, wantMessage: "split must be one of project, scraper, domain, proxy"},
+		"from after to":          {target: bandwidthTarget("2026-11-16T12:00:00Z", "2026-11-16T10:00:00Z", ""), reader: &fakeRequestReader{}, wantMessage: "from must be before to"},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			recorder := getWithSession(newRequestsHandler(test.reader, nil), test.target)
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status %d, want 400", recorder.Code)
+			}
+			var response struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if response.Error != test.wantMessage {
+				t.Fatalf("error %q, want %q", response.Error, test.wantMessage)
+			}
+		})
+	}
+}
+
+func TestBandwidthReturnsEmptyArraysWithoutRows(t *testing.T) {
+	recorder, _ := getBandwidth(t, &fakeRequestReader{}, bandwidthTarget("2026-11-16T10:00:00Z", "2026-11-16T12:00:00Z", ""))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	for _, want := range []string{`"series":[]`, `"groups":[]`, `"total_bytes":0`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body %s lacks %s", body, want)
+		}
 	}
 }

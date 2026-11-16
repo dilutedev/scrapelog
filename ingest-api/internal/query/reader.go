@@ -16,7 +16,13 @@ var (
 	ErrRequestNotFound   = errors.New("request not found")
 	ErrQueryTimeout      = errors.New("clickhouse query timed out")
 	ErrUnknownFacetField = errors.New("unknown facet field")
+
+	ErrUnknownBandwidthSplit = errors.New("unknown bandwidth split")
 )
+
+var bandwidthSplitColumns = map[string]bool{"project": true, "scraper": true, "domain": true, "proxy": true}
+
+const bandwidthTopGroupCount = 8
 
 var facetColumns = map[string]bool{
 	"domain":      true,
@@ -304,4 +310,94 @@ func (reader *Reader) Facets(ctx context.Context, facetRequest FacetRequest) ([]
 		return nil, classifyError(err)
 	}
 	return values, nil
+}
+
+type BandwidthRequest struct {
+	Split       string
+	Project     string
+	From        time.Time
+	To          time.Time
+	StepSeconds int64
+}
+
+type BandwidthRow struct {
+	Start     time.Time
+	Key       string
+	Other     bool
+	Bytes     uint64
+	Responses uint64
+}
+
+func (reader *Reader) Bandwidth(ctx context.Context, bandwidthRequest BandwidthRequest) ([]BandwidthRow, error) {
+	if !bandwidthSplitColumns[bandwidthRequest.Split] {
+		return nil, ErrUnknownBandwidthSplit
+	}
+	column := bandwidthRequest.Split
+	rangeCondition := "hour >= {range_from:DateTime64(3)} AND hour < {range_to:DateTime64(3)}"
+	args := []any{
+		clickhouse.Named("range_from", bandwidthRequest.From),
+		clickhouse.Named("range_to", bandwidthRequest.To),
+	}
+	if bandwidthRequest.Project != "" {
+		rangeCondition += " AND project = {project:String}"
+		args = append(args, clickhouse.Named("project", bandwidthRequest.Project))
+	}
+
+	topKeysStatement := "SELECT " + column + " AS group_key, sumMerge(total_response_size) AS group_bytes\n" +
+		"FROM requests_hourly\n" +
+		"WHERE " + rangeCondition + "\n" +
+		fmt.Sprintf("GROUP BY group_key ORDER BY group_bytes DESC, group_key LIMIT %d", bandwidthTopGroupCount)
+	topRows, err := reader.connection.Query(ctx, topKeysStatement, args...)
+	if err != nil {
+		return nil, classifyError(err)
+	}
+	defer topRows.Close()
+	topKeys := []string{}
+	for topRows.Next() {
+		var groupKey string
+		var groupBytes uint64
+		if err := topRows.Scan(&groupKey, &groupBytes); err != nil {
+			return nil, classifyError(err)
+		}
+		topKeys = append(topKeys, groupKey)
+	}
+	if err := topRows.Err(); err != nil {
+		return nil, classifyError(err)
+	}
+	if len(topKeys) == 0 {
+		return []BandwidthRow{}, nil
+	}
+
+	seriesStatement := "SELECT intDiv(toUnixTimestamp(hour), {step_seconds:UInt32}) * {step_seconds:UInt32} AS bucket,\n" +
+		"       has({top_keys:Array(String)}, " + column + ") AS is_top,\n" +
+		"       if(is_top, " + column + ", '') AS series_key,\n" +
+		"       sumMerge(total_response_size), sumMerge(request_count)\n" +
+		"FROM requests_hourly\n" +
+		"WHERE " + rangeCondition + "\n" +
+		"GROUP BY bucket, is_top, series_key ORDER BY bucket"
+	args = append(args,
+		clickhouse.Named("step_seconds", uint32(bandwidthRequest.StepSeconds)),
+		clickhouse.Named("top_keys", topKeys),
+	)
+	seriesRows, err := reader.connection.Query(ctx, seriesStatement, args...)
+	if err != nil {
+		return nil, classifyError(err)
+	}
+	defer seriesRows.Close()
+	bandwidthRows := []BandwidthRow{}
+	for seriesRows.Next() {
+		var bucketSeconds uint64
+		var isTop uint8
+		var bandwidthRow BandwidthRow
+		if err := seriesRows.Scan(&bucketSeconds, &isTop, &bandwidthRow.Key, &bandwidthRow.Bytes, &bandwidthRow.Responses); err != nil {
+			return nil, classifyError(err)
+		}
+		bandwidthRow.Start = time.Unix(int64(bucketSeconds), 0).UTC()
+		bandwidthRow.Other = isTop == 0
+		bandwidthRows = append(bandwidthRows, bandwidthRow)
+	}
+	if err := seriesRows.Err(); err != nil {
+		return nil, classifyError(err)
+	}
+	return bandwidthRows, nil
 }

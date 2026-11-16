@@ -45,6 +45,7 @@ func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse
 	router.HandleFunc("GET /ui/api/request/body", withSecurityHeaders(requireSession(sessionSigner, requestBodyHandler(logger, requestReader, bodyGetter))))
 	router.HandleFunc("GET /ui/api/tape", withSecurityHeaders(requireSession(sessionSigner, tapeHandler(logger, requestReader))))
 	router.HandleFunc("GET /ui/api/facets", withSecurityHeaders(requireSession(sessionSigner, facetsHandler(logger, requestReader))))
+	router.HandleFunc("GET /ui/api/bandwidth", withSecurityHeaders(requireSession(sessionSigner, bandwidthHandler(logger, requestReader))))
 	router.HandleFunc("GET /ui/api/alert-rules", withSecurityHeaders(requireSession(sessionSigner, listAlertRulesHandler(logger, alertStore))))
 	router.HandleFunc("POST /ui/api/alert-rules", withSecurityHeaders(requireSession(sessionSigner, requireSameOriginJSON(createAlertRuleHandler(logger, alertStore, alertRuleRefresher)))))
 	router.HandleFunc("PUT /ui/api/alert-rules/{rule_id}", withSecurityHeaders(requireSession(sessionSigner, requireSameOriginJSON(updateAlertRuleHandler(logger, alertStore, alertRuleRefresher)))))
