@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"sync/atomic"
 	"time"
+
+	"github.com/dilutedev/scrapelog/ingest-api/internal/ingest"
 )
 
 const (
@@ -68,4 +70,17 @@ func (cache *Cache) RunRefreshLoop(ctx context.Context, logger *slog.Logger) {
 
 func (cache *Cache) Rules() []CompiledRule {
 	return *cache.rules.Load()
+}
+
+func (cache *Cache) MatchRecords(records []ingest.Record) []PendingAlert {
+	rules := cache.Rules()
+	var pendingAlerts []PendingAlert
+	for _, record := range records {
+		for ruleIndex := range rules {
+			if match, matched := rules[ruleIndex].Match(record); matched {
+				pendingAlerts = append(pendingAlerts, PendingAlert{Rule: &rules[ruleIndex].Rule, Match: match})
+			}
+		}
+	}
+	return pendingAlerts
 }
