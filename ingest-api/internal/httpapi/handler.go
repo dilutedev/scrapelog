@@ -22,7 +22,7 @@ type KeyCache interface {
 	KeyRefresher
 }
 
-func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse ClickHousePinger, keyStore KeyStore, keyCache KeyCache, recordWriter RecordWriter, bodyStore BodyStore, storageReporter StorageReporter, diskGuard DiskGuard, requestReader RequestReader, bodyGetter BodyGetter, alertStore AlertStore, alertRuleRefresher AlertRuleRefresher, alertTester AlertTester, alertMatcher AlertMatcher, alertQueue AlertQueue, archivingEnabled bool, archiveLister ArchiveLister, archiveDownloader ArchiveDownloader, loadedConfig config.Config) http.Handler {
+func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse ClickHousePinger, keyStore KeyStore, keyCache KeyCache, recordWriter RecordWriter, bodyStore BodyStore, storageReporter StorageReporter, diskGuard DiskGuard, requestReader RequestReader, bodyGetter BodyGetter, alertStore AlertStore, alertRuleRefresher AlertRuleRefresher, alertTester AlertTester, alertMatcher AlertMatcher, alertQueue AlertQueue, archivingEnabled bool, archiveLister ArchiveLister, archiveDownloader ArchiveDownloader, restoreService RestoreService, loadedConfig config.Config) http.Handler {
 	adminTokenHash := sha256.Sum256([]byte(loadedConfig.AdminToken))
 	recordLimiter := ratelimit.New(loadedConfig.RateLimitRecordsPerMinute, time.Now)
 	sessionSigner := session.New(loadedConfig.AdminToken, time.Now)
@@ -55,6 +55,10 @@ func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse
 	router.HandleFunc("GET /ui/api/alert-events", withSecurityHeaders(requireSession(sessionSigner, listAlertEventsHandler(logger, alertStore))))
 	router.HandleFunc("GET /ui/api/archives", withSecurityHeaders(requireSession(sessionSigner, listArchivesHandler(logger, archivingEnabled, archiveLister))))
 	router.HandleFunc("GET /ui/api/archives/{day}/download", withSecurityHeaders(requireSession(sessionSigner, downloadArchiveHandler(logger, archivingEnabled, archiveLister, archiveDownloader))))
+	router.HandleFunc("GET /ui/api/restores/estimate", withSecurityHeaders(requireSession(sessionSigner, estimateRestoreHandler(logger, archivingEnabled, restoreService))))
+	router.HandleFunc("GET /ui/api/restores", withSecurityHeaders(requireSession(sessionSigner, listRestoresHandler(logger, archivingEnabled, restoreService))))
+	router.HandleFunc("POST /ui/api/restores", withSecurityHeaders(requireSession(sessionSigner, requireSameOriginJSON(startRestoreHandler(logger, archivingEnabled, restoreService)))))
+	router.HandleFunc("DELETE /ui/api/restores/{restore_id}", withSecurityHeaders(requireSession(sessionSigner, requireSameOriginJSON(deleteRestoreHandler(logger, archivingEnabled, restoreService)))))
 	router.HandleFunc("GET /{$}", withSecurityHeaders(http.RedirectHandler("/requests", http.StatusFound).ServeHTTP))
 	router.HandleFunc("GET /login", withSecurityHeaders(ui.PageHandler(logger, "login")))
 	router.HandleFunc("GET /bandwidth", withSecurityHeaders(requireSessionPage(sessionSigner, ui.PageHandler(logger, "bandwidth"))))

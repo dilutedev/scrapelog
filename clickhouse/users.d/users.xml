@@ -88,6 +88,7 @@
             <grants>
                 <query>GRANT SELECT ON scrapelog.requests</query>
                 <query>GRANT SELECT ON scrapelog.requests_hourly</query>
+                <query>GRANT SELECT ON scrapelog.requests_restored</query>
                 <query>GRANT SHOW TABLES ON scrapelog.*</query>
                 <query>GRANT SHOW TABLES ON system.*</query>
                 <query>GRANT SELECT ON system.parts</query>
@@ -103,6 +104,10 @@
             <grants>
                 <query>GRANT SELECT ON scrapelog.requests</query>
                 <query>GRANT INSERT, SELECT ON scrapelog.archive_days</query>
+                <query>GRANT INSERT, SELECT ON scrapelog.requests_restored</query>
+                <query>GRANT INSERT, SELECT ON scrapelog.archive_restores</query>
+                <query>GRANT ALTER DELETE ON scrapelog.requests_restored</query>
+                <query>GRANT SELECT ON system.processes</query>
                 <query>GRANT SELECT ON system.parts</query>
                 <query>GRANT NAMED COLLECTION ON archive_s3</query>
                 <query>GRANT CREATE TEMPORARY TABLE ON *.*</query>

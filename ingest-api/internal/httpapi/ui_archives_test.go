@@ -44,7 +44,7 @@ func (downloader *fakeArchiveDownloader) Open(ctx context.Context, key string) (
 
 func newArchivesHandler(archivingEnabled bool, archiveLister ArchiveLister, archiveDownloader ArchiveDownloader) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, archivingEnabled, archiveLister, archiveDownloader, config.Config{AdminToken: testAdminToken})
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, archivingEnabled, archiveLister, archiveDownloader, nil, config.Config{AdminToken: testAdminToken})
 }
 
 func sampleArchivedDays() []archive.ArchivedDay {

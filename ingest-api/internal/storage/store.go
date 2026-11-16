@@ -44,7 +44,7 @@ func (store *Store) DiskUsedBytes(ctx context.Context) (uint64, error) {
 	return usedBytes, nil
 }
 
-func (store *Store) requestsTableSize(ctx context.Context) (uint64, uint64, error) {
+func (store *Store) RequestsTableSize(ctx context.Context) (uint64, uint64, error) {
 	var tableRows, tableBytes uint64
 	if err := store.connection.QueryRow(ctx, requestsTableSizeQuery).Scan(&tableRows, &tableBytes); err != nil {
 		return 0, 0, err
@@ -53,7 +53,7 @@ func (store *Store) requestsTableSize(ctx context.Context) (uint64, uint64, erro
 }
 
 func (store *Store) ProjectStats(ctx context.Context, project string) (ProjectStats, error) {
-	tableRows, tableBytes, err := store.requestsTableSize(ctx)
+	tableRows, tableBytes, err := store.RequestsTableSize(ctx)
 	if err != nil {
 		return ProjectStats{}, err
 	}
@@ -73,7 +73,7 @@ func (store *Store) ProjectStats(ctx context.Context, project string) (ProjectSt
 }
 
 func (store *Store) ProjectUsage(ctx context.Context) ([]ProjectUsage, error) {
-	tableRows, tableBytes, err := store.requestsTableSize(ctx)
+	tableRows, tableBytes, err := store.RequestsTableSize(ctx)
 	if err != nil {
 		return nil, err
 	}

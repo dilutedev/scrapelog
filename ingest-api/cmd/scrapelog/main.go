@@ -95,6 +95,7 @@ func serve() int {
 	archiverOptions.Auth.Database = loadedConfig.ClickHouseDatabase
 	archiverOptions.Auth.Username = loadedConfig.ClickHouseArchiverUser
 	archiverOptions.Auth.Password = loadedConfig.ClickHouseArchiverPassword
+	archiverOptions.ReadTimeout = 16 * time.Minute
 
 	archiverConnection, err := clickhouse.Open(archiverOptions)
 	if err != nil {
@@ -152,17 +153,21 @@ func serve() int {
 	go alertDispatcher.Run()
 	go diskGuard.RunRefreshLoop(signalContext, logger)
 	var archiveLister httpapi.ArchiveLister
+	var restoreService httpapi.RestoreService
 	if archivingEnabled {
 		archiver := archive.NewArchiver(archiverConnection)
 		go archiver.Run(signalContext, logger)
 		archiveLister = archiver
+		restorer := archive.NewRestorer(archiverConnection, archiver, storageStore, uint64(loadedConfig.ClickHouseDiskBudgetBytes), logger)
+		restorer.StopInterrupted(signalContext)
+		restoreService = restorer
 	} else if loadedConfig.S3Endpoint != "" {
 		logger.Warn("archiving disabled: S3_ENDPOINT must not end with a slash")
 	}
 
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, requestReader, bodyGetter, alertStore, alertCache, alertDispatcher, alertCache, alertDispatcher, archivingEnabled, archiveLister, archiveDownloader, loadedConfig),
+		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, requestReader, bodyGetter, alertStore, alertCache, alertDispatcher, alertCache, alertDispatcher, archivingEnabled, archiveLister, archiveDownloader, restoreService, loadedConfig),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
