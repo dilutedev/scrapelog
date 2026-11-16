@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,10 +14,12 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
 
+	"github.com/dilutedev/scrapelog/ingest-api/internal/alerts"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/apikeys"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/bodies"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
@@ -93,7 +96,7 @@ func serveIngest(writer *fakeRecordWriter, loadedConfig config.Config, body io.R
 		request.Header.Set("Content-Encoding", contentEncoding)
 	}
 	recorder := httptest.NewRecorder()
-	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, loadedConfig).ServeHTTP(recorder, request)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, loadedConfig).ServeHTTP(recorder, request)
 	return recorder
 }
 
@@ -110,7 +113,7 @@ func (refresher *twoKeyRefresher) Authenticate(fullKey string) (apikeys.Identity
 
 func newRateLimitedHandler(writer *fakeRecordWriter, loadedConfig config.Config) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &twoKeyRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, loadedConfig)
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &twoKeyRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, loadedConfig)
 }
 
 func serveIngestWith(handler http.Handler, apiKey string, body io.Reader) *httptest.ResponseRecorder {
@@ -309,7 +312,7 @@ func TestIngestDoesNotLogRequestBodyContent(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer good-key")
 	recorder := httptest.NewRecorder()
 
-	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, bodyConfig).ServeHTTP(recorder, request)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, bodyConfig).ServeHTTP(recorder, request)
 
 	if strings.Contains(logOutput.String(), "secret-body-content") || strings.Contains(recorder.Body.String(), "secret-body-content") {
 		t.Fatalf("body content leaked: log %s response %s", logOutput.String(), recorder.Body.String())
@@ -450,7 +453,7 @@ func TestIngestInsertContextHasDeadline(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/v1/requests", strings.NewReader(recordsJSON(1)))
 	request.Header.Set("Authorization", "Bearer good-key")
 
-	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, deadlineWriter, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(httptest.NewRecorder(), request)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, deadlineWriter, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, testIngestConfig).ServeHTTP(httptest.NewRecorder(), request)
 
 	if !deadlineWriter.hadDeadline {
 		t.Fatal("insert context has no deadline")
@@ -475,7 +478,7 @@ func TestIngestRequiresAPIKeyBeforeReadingBody(t *testing.T) {
 		}
 		recorder := httptest.NewRecorder()
 
-		NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, testIngestConfig).ServeHTTP(recorder, request)
+		NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, testIngestConfig).ServeHTTP(recorder, request)
 
 		if recorder.Code != http.StatusUnauthorized {
 			t.Errorf("%s: status %d, want 401", name, recorder.Code)
@@ -485,7 +488,7 @@ func TestIngestRequiresAPIKeyBeforeReadingBody(t *testing.T) {
 
 func newGuardedHandler(writer *fakeRecordWriter, guard *fakeDiskGuard, logOutput io.Writer, loadedConfig config.Config) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(logOutput, nil))
-	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, guard, loadedConfig)
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, guard, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, loadedConfig)
 }
 
 func TestIngestOverBudgetRejectsWithoutReadingBodyOrSpendingTokens(t *testing.T) {
@@ -534,7 +537,7 @@ func TestIngestNearBudgetInsertsAndLogsWarningOnce(t *testing.T) {
 func newBodyStoreHandler(writer *fakeRecordWriter, bodyStore BodyStore, guard DiskGuard, loadedConfig config.Config) http.Handler {
 	loadedConfig.MaxBodyBytes = 1024
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, bodyStore, &fakeStorageReporter{}, guard, loadedConfig)
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, bodyStore, &fakeStorageReporter{}, guard, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, loadedConfig)
 }
 
 func TestIngestUploadsBodiesBeforeInsertAndReportsWarnings(t *testing.T) {
@@ -598,5 +601,144 @@ func TestIngestRejectedRequestsNeverCallBodyStore(t *testing.T) {
 	requireRateLimited(t, recorder)
 	if callsAfterAcceptedBatch != 1 || bodyStore.calls != 1 {
 		t.Fatalf("body store calls %d then %d, want 1 and 1", callsAfterAcceptedBatch, bodyStore.calls)
+	}
+}
+
+type fakeRuleLister struct {
+	rules []alerts.Rule
+}
+
+func (lister *fakeRuleLister) ListRules(ctx context.Context) ([]alerts.Rule, error) {
+	return lister.rules, nil
+}
+
+func emptyAlertMatcher() AlertMatcher {
+	return alerts.NewCache(&fakeRuleLister{})
+}
+
+func captchaBlockRuleMatcher(t *testing.T) AlertMatcher {
+	t.Helper()
+	cache := alerts.NewCache(&fakeRuleLister{rules: []alerts.Rule{{
+		RuleID: "rule-1",
+		Name:   "captcha block",
+		Conditions: []alerts.Condition{
+			{Field: "status", Operator: "equals", Value: "403"},
+			{Field: "body", Operator: "contains", Value: "captcha"},
+		},
+		Channel:           alerts.ChannelDiscord,
+		DiscordWebhookURL: "https://discord.example/api/webhooks/1/abc",
+		WindowSeconds:     60,
+		Enabled:           true,
+	}}})
+	if err := cache.Refresh(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return cache
+}
+
+type fakeAlertQueue struct {
+	mutex            sync.Mutex
+	insertCount      func() int
+	enqueues         [][]alerts.PendingAlert
+	insertsAtEnqueue []int
+}
+
+func (queue *fakeAlertQueue) Enqueue(pendingAlerts []alerts.PendingAlert) {
+	queue.mutex.Lock()
+	defer queue.mutex.Unlock()
+	queue.enqueues = append(queue.enqueues, pendingAlerts)
+	if queue.insertCount != nil {
+		queue.insertsAtEnqueue = append(queue.insertsAtEnqueue, queue.insertCount())
+	}
+}
+
+func (queue *fakeAlertQueue) enqueuedAlertCount() int {
+	queue.mutex.Lock()
+	defer queue.mutex.Unlock()
+	total := 0
+	for _, pendingAlerts := range queue.enqueues {
+		total += len(pendingAlerts)
+	}
+	return total
+}
+
+func serveIngestWithAlerts(writer *fakeRecordWriter, alertMatcher AlertMatcher, alertQueue AlertQueue, payload string) *httptest.ResponseRecorder {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	loadedConfig := testIngestConfig
+	loadedConfig.MaxBodyBytes = 1024
+	handler := NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, writer, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, alertMatcher, alertQueue, false, nil, nil, nil, loadedConfig)
+	return serveIngestWith(handler, "good-key", strings.NewReader(payload))
+}
+
+const captchaBlockBatch = `[
+{"url":"https://a.com/1","method":"GET","status":403,"request_id":"r1","body":"please solve the captcha"},
+{"url":"https://a.com/2","method":"GET","status":200,"request_id":"r2","body":"captcha but fine"},
+{"url":"https://a.com/3","method":"GET","status":403,"request_id":"r3","body":"captcha again"}
+]`
+
+func TestIngestEnqueuesMatchesAfterInsert(t *testing.T) {
+	writer := &fakeRecordWriter{}
+	alertQueue := &fakeAlertQueue{insertCount: func() int { return writer.calls }}
+
+	recorder := serveIngestWithAlerts(writer, captchaBlockRuleMatcher(t), alertQueue, captchaBlockBatch)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d, body %s", recorder.Code, recorder.Body.String())
+	}
+	if len(alertQueue.enqueues) != 1 || len(alertQueue.enqueues[0]) != 2 {
+		t.Fatalf("expected one enqueue of 2 alerts, got %v", alertQueue.enqueues)
+	}
+	if alertQueue.insertsAtEnqueue[0] != 1 {
+		t.Fatalf("enqueue happened with %d inserts, want 1", alertQueue.insertsAtEnqueue[0])
+	}
+	for index, expectedRequestID := range []string{"r1", "r3"} {
+		if alertQueue.enqueues[0][index].Match.RequestID != expectedRequestID {
+			t.Fatalf("alert %d request %s, want %s", index, alertQueue.enqueues[0][index].Match.RequestID, expectedRequestID)
+		}
+	}
+}
+
+func TestIngestFailedInsertEnqueuesNothing(t *testing.T) {
+	writer := &fakeRecordWriter{err: errors.New("clickhouse down")}
+	alertQueue := &fakeAlertQueue{}
+
+	recorder := serveIngestWithAlerts(writer, captchaBlockRuleMatcher(t), alertQueue, captchaBlockBatch)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d, want 503", recorder.Code)
+	}
+	if alertQueue.enqueuedAlertCount() != 0 {
+		t.Fatalf("expected no alerts, got %d", alertQueue.enqueuedAlertCount())
+	}
+}
+
+func TestIngestRecordsMatchingNoRuleEnqueueNothing(t *testing.T) {
+	writer := &fakeRecordWriter{}
+	alertQueue := &fakeAlertQueue{}
+	payload := `[{"url":"https://a.com/1","method":"GET","status":200,"body":"captcha"},{"url":"https://a.com/2","method":"GET","status":403,"body":"clean"}]`
+
+	recorder := serveIngestWithAlerts(writer, captchaBlockRuleMatcher(t), alertQueue, payload)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d, body %s", recorder.Code, recorder.Body.String())
+	}
+	if alertQueue.enqueuedAlertCount() != 0 {
+		t.Fatalf("expected no alerts, got %d", alertQueue.enqueuedAlertCount())
+	}
+}
+
+func TestIngestBase64BodyMatchesDecodedText(t *testing.T) {
+	writer := &fakeRecordWriter{}
+	alertQueue := &fakeAlertQueue{}
+	encodedBody := base64.StdEncoding.EncodeToString([]byte("Access Denied by captcha"))
+	payload := `[{"url":"https://a.com/1","method":"GET","status":403,"request_id":"r1","body":"` + encodedBody + `","body_encoding":"base64"}]`
+
+	recorder := serveIngestWithAlerts(writer, captchaBlockRuleMatcher(t), alertQueue, payload)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d, body %s", recorder.Code, recorder.Body.String())
+	}
+	if alertQueue.enqueuedAlertCount() != 1 {
+		t.Fatalf("expected 1 alert, got %d", alertQueue.enqueuedAlertCount())
 	}
 }

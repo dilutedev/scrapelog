@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alert rule · scrapelog</title>
+<link rel="stylesheet" href="/assets/{{.AssetVersion}}/app.css">
+<script type="module" src="/assets/{{.AssetVersion}}/alert-edit.js"></script>
+</head>
+<body>
+{{template "topbar" .}}
+<main class="alert-edit">
+<p><a href="/alerts">Back to alerts</a></p>
+<h1 id="editor-title">New rule</h1>
+<p id="editor-missing" hidden>This rule doesn't exist or was deleted.</p>
+<form id="rule-form" class="rule-form" novalidate>
+<label for="rule-name">Name</label>
+<input id="rule-name" maxlength="128" required>
+<label for="rule-project">Project</label>
+<input id="rule-project" placeholder="All projects">
+<fieldset>
+<legend>Conditions (all must match)</legend>
+<ol id="condition-rows" class="condition-rows"></ol>
+<button type="button" id="add-condition">Add condition</button>
+</fieldset>
+<fieldset>
+<legend>Send to</legend>
+<label><input type="radio" name="channel" value="discord" checked> Discord</label>
+<label><input type="radio" name="channel" value="telegram"> Telegram</label>
+<div id="discord-fields">
+<label for="discord-webhook">Webhook URL <span id="discord-saved" class="saved-tag" hidden>Saved</span></label>
+<input id="discord-webhook" type="password" autocomplete="off">
+</div>
+<div id="telegram-fields" hidden>
+<label for="telegram-token">Bot token <span id="telegram-saved" class="saved-tag" hidden>Saved</span></label>
+<input id="telegram-token" type="password" autocomplete="off">
+<label for="telegram-chat">Chat ID</label>
+<input id="telegram-chat">
+</div>
+</fieldset>
+<p class="window-line"><label for="rule-window">At most one message every</label> <input id="rule-window" type="number" min="10" max="3600" value="60"> seconds</p>
+<label><input type="checkbox" id="rule-enabled" checked> Enabled</label>
+<p id="rule-preview" class="rule-preview" aria-live="polite"></p>
+<p id="editor-status" role="status"></p>
+<div class="editor-actions">
+<button type="button" id="send-test" disabled>Send test message</button>
+<button type="submit" id="save-rule">Save rule</button>
+<button type="button" id="delete-rule" hidden>Delete rule</button>
+</div>
+<p id="test-note" class="note">Save the rule first to send a test message.</p>
+</form>
+</main>
+</body>
+</html>

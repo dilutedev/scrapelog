@@ -1,0 +1,12 @@
+<clickhouse>
+    <access_control_improvements>
+        <enable_read_write_grants>true</enable_read_write_grants>
+    </access_control_improvements>
+    <named_collections>
+        <archive_s3>
+            <url from_env="ARCHIVE_S3_URL" overridable="false"/>
+            <access_key_id from_env="S3_ACCESS_KEY_ID" overridable="false"/>
+            <secret_access_key from_env="S3_SECRET_ACCESS_KEY" overridable="false"/>
+        </archive_s3>
+    </named_collections>
+</clickhouse>

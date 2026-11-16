@@ -1,0 +1,12 @@
+{{define "topbar"}}<header class="topbar">
+<span class="brand">scrapelog</span>
+<nav aria-label="Sections">
+<a href="/requests" aria-current="{{if eq .Page "requests"}}page{{else}}false{{end}}">Requests</a>
+<a href="/bandwidth" aria-current="{{if eq .Page "bandwidth"}}page{{else}}false{{end}}">Bandwidth</a>
+<a href="/alerts" aria-current="{{if or (eq .Page "alerts") (eq .Page "alert-edit")}}page{{else}}false{{end}}">Alerts</a>
+<a href="/archive" aria-current="{{if eq .Page "archive"}}page{{else}}false{{end}}">Archive</a>
+</nav>
+<button type="button" id="sign-out">Sign out</button>
+</header>
+<script type="module" src="/assets/{{.AssetVersion}}/shell.js"></script>
+{{end}}

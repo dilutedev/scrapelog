@@ -8,16 +8,20 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 
+	"github.com/dilutedev/scrapelog/ingest-api/internal/alerts"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/apikeys"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/archive"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/bodies"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/httpapi"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ingest"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/query"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/storage"
 )
 
@@ -67,6 +71,39 @@ func serve() int {
 	}
 	defer connection.Close()
 
+	readerOptions, err := clickhouse.ParseDSN(loadedConfig.ClickHouseURL)
+	if err != nil {
+		logger.Error("parsing clickhouse url failed", "error", err)
+		return 1
+	}
+	readerOptions.Auth.Database = loadedConfig.ClickHouseDatabase
+	readerOptions.Auth.Username = loadedConfig.ClickHouseReaderUser
+	readerOptions.Auth.Password = loadedConfig.ClickHouseReaderPassword
+
+	readerConnection, err := clickhouse.Open(readerOptions)
+	if err != nil {
+		logger.Error("opening clickhouse reader connection failed", "error", err)
+		return 1
+	}
+	defer readerConnection.Close()
+
+	archiverOptions, err := clickhouse.ParseDSN(loadedConfig.ClickHouseURL)
+	if err != nil {
+		logger.Error("parsing clickhouse url failed", "error", err)
+		return 1
+	}
+	archiverOptions.Auth.Database = loadedConfig.ClickHouseDatabase
+	archiverOptions.Auth.Username = loadedConfig.ClickHouseArchiverUser
+	archiverOptions.Auth.Password = loadedConfig.ClickHouseArchiverPassword
+	archiverOptions.ReadTimeout = 16 * time.Minute
+
+	archiverConnection, err := clickhouse.Open(archiverOptions)
+	if err != nil {
+		logger.Error("opening clickhouse archiver connection failed", "error", err)
+		return 1
+	}
+	defer archiverConnection.Close()
+
 	signalContext, stopSignalHandling := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignalHandling()
 
@@ -89,17 +126,48 @@ func serve() int {
 		return 1
 	}
 	recordWriter := ingest.NewWriter(connection)
+	requestReader := query.NewReader(readerConnection)
 	var bodyUploader bodies.Uploader
+	var bodyGetter httpapi.BodyGetter
+	var archiveDownloader httpapi.ArchiveDownloader
+	archivingEnabled := loadedConfig.S3Endpoint != "" && !strings.HasSuffix(loadedConfig.S3Endpoint, "/")
 	if loadedConfig.S3Endpoint != "" {
-		bodyUploader = bodies.NewS3Uploader(loadedConfig.S3Endpoint, loadedConfig.S3Bucket, loadedConfig.S3Region, loadedConfig.S3AccessKeyID, loadedConfig.S3SecretAccessKey)
+		s3Client := bodies.NewS3Uploader(loadedConfig.S3Endpoint, loadedConfig.S3Bucket, loadedConfig.S3Region, loadedConfig.S3AccessKeyID, loadedConfig.S3SecretAccessKey)
+		bodyUploader = s3Client
+		bodyGetter = s3Client
+		if archivingEnabled {
+			archiveDownloader = s3Client
+		}
 	}
 	bodyStore := bodies.NewStore(bodyUploader, loadedConfig.S3BodyPrefix, logger)
+	alertStore := alerts.NewStore(connection)
+	alertCache := alerts.NewCache(alertStore)
+	alertDispatcher := alerts.NewDispatcher(logger, alertStore, loadedConfig.PublicURL)
+	alertStartupContext, cancelAlertStartup := context.WithTimeout(signalContext, 10*time.Second)
+	if err := alertCache.Refresh(alertStartupContext); err != nil {
+		logger.Error("loading alert rules failed", "error", err)
+	}
+	cancelAlertStartup()
 	go keyCache.RunRefreshLoop(signalContext, logger)
+	go alertCache.RunRefreshLoop(signalContext, logger)
+	go alertDispatcher.Run()
 	go diskGuard.RunRefreshLoop(signalContext, logger)
+	var archiveLister httpapi.ArchiveLister
+	var restoreService httpapi.RestoreService
+	if archivingEnabled {
+		archiver := archive.NewArchiver(archiverConnection)
+		go archiver.Run(signalContext, logger)
+		archiveLister = archiver
+		restorer := archive.NewRestorer(archiverConnection, archiver, storageStore, uint64(loadedConfig.ClickHouseDiskBudgetBytes), logger)
+		restorer.StopInterrupted(signalContext)
+		restoreService = restorer
+	} else if loadedConfig.S3Endpoint != "" {
+		logger.Warn("archiving disabled: S3_ENDPOINT must not end with a slash")
+	}
 
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, loadedConfig),
+		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, requestReader, bodyGetter, alertStore, alertCache, alertDispatcher, alertCache, alertDispatcher, archivingEnabled, archiveLister, archiveDownloader, restoreService, loadedConfig),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -122,8 +190,12 @@ func serve() int {
 	logger.Info("shutdown started")
 	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancelShutdown()
-	if err := server.Shutdown(shutdownContext); err != nil {
-		logger.Error("shutdown failed", "error", err)
+	serverShutdownError := server.Shutdown(shutdownContext)
+	dispatcherShutdownContext, cancelDispatcherShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelDispatcherShutdown()
+	alertDispatcher.Shutdown(dispatcherShutdownContext)
+	if serverShutdownError != nil {
+		logger.Error("shutdown failed", "error", serverShutdownError)
 		return 1
 	}
 	logger.Info("server stopped")

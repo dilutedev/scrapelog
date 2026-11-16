@@ -4,7 +4,14 @@
             <async_insert>1</async_insert>
             <wait_for_async_insert>1</wait_for_async_insert>
         </ingest_writer>
-        <grafana_reader>
+        <archiver>
+            <max_memory_usage>1073741824</max_memory_usage>
+            <max_threads>2</max_threads>
+            <max_insert_threads>1</max_insert_threads>
+            <max_execution_time>900</max_execution_time>
+            <output_format_parquet_row_group_size>100000</output_format_parquet_row_group_size>
+        </archiver>
+        <ui_reader>
             <readonly>1</readonly>
             <max_memory_usage>2147483648</max_memory_usage>
             <max_execution_time>60</max_execution_time>
@@ -18,7 +25,7 @@
                     <changeable_in_readonly/>
                 </max_execution_time>
             </constraints>
-        </grafana_reader>
+        </ui_reader>
     </profiles>
     <users>
         <scrapelog_admin>
@@ -34,25 +41,48 @@
             <grants>
                 <query>GRANT INSERT, SELECT ON scrapelog.requests</query>
                 <query>GRANT INSERT, SELECT ON scrapelog.api_keys</query>
+                <query>GRANT INSERT, SELECT ON scrapelog.alert_rules</query>
+                <query>GRANT INSERT, SELECT ON scrapelog.alert_events</query>
                 <query>GRANT SHOW TABLES ON scrapelog.*</query>
                 <query>GRANT SHOW TABLES ON system.*</query>
                 <query>GRANT SELECT ON system.parts</query>
             </grants>
         </ingest_writer>
-        <grafana_reader>
+        <ui_reader>
             <password from_env="CLICKHOUSE_READER_PASSWORD"/>
             <networks>
                 <ip>::/0</ip>
             </networks>
-            <profile>grafana_reader</profile>
+            <profile>ui_reader</profile>
             <quota>default</quota>
             <grants>
                 <query>GRANT SELECT ON scrapelog.requests</query>
                 <query>GRANT SELECT ON scrapelog.requests_hourly</query>
+                <query>GRANT SELECT ON scrapelog.requests_restored</query>
                 <query>GRANT SHOW TABLES ON scrapelog.*</query>
                 <query>GRANT SHOW TABLES ON system.*</query>
                 <query>GRANT SELECT ON system.parts</query>
             </grants>
-        </grafana_reader>
+        </ui_reader>
+        <archiver>
+            <password from_env="CLICKHOUSE_ARCHIVER_PASSWORD"/>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>archiver</profile>
+            <quota>default</quota>
+            <grants>
+                <query>GRANT SELECT ON scrapelog.requests</query>
+                <query>GRANT INSERT, SELECT ON scrapelog.archive_days</query>
+                <query>GRANT INSERT, SELECT ON scrapelog.requests_restored</query>
+                <query>GRANT INSERT, SELECT ON scrapelog.archive_restores</query>
+                <query>GRANT ALTER DELETE ON scrapelog.requests_restored</query>
+                <query>GRANT SELECT ON system.processes</query>
+                <query>GRANT SELECT ON system.parts</query>
+                <query>GRANT NAMED COLLECTION ON archive_s3</query>
+                <query>GRANT CREATE TEMPORARY TABLE ON *.*</query>
+                <query from_env="ARCHIVE_S3_GRANT"/>
+            </grants>
+        </archiver>
     </users>
 </clickhouse>

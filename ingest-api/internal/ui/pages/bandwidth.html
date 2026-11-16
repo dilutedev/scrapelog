@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bandwidth · scrapelog</title>
+<link rel="stylesheet" href="/assets/{{.AssetVersion}}/app.css">
+<link rel="stylesheet" href="/assets/{{.AssetVersion}}/vendor/uplot/uPlot.min.css">
+<script type="module" src="/assets/{{.AssetVersion}}/bandwidth.js"></script>
+</head>
+<body>
+{{template "topbar" .}}
+<main class="bandwidth">
+<h1 id="bandwidth-headline" class="headline"></h1>
+<form id="bandwidth-controls" class="bandwidth-controls">
+<label for="split-select">Split by</label>
+<select id="split-select">
+<option value="proxy">Proxy</option>
+<option value="project">Project</option>
+<option value="scraper">Scraper</option>
+<option value="domain">Domain</option>
+</select>
+<label for="project-select">Project</label>
+<select id="project-select">
+<option value="">All projects</option>
+</select>
+<label for="range-select">Range</label>
+<select id="range-select">
+<option value="24h">Last 24 hours</option>
+<option value="7d">Last 7 days</option>
+<option value="30d">Last 30 days</option>
+<option value="90d">Last 90 days</option>
+</select>
+<label for="step-select">Step</label>
+<select id="step-select">
+<option value="hour">Hour</option>
+<option value="day">Day</option>
+</select>
+</form>
+<p id="bandwidth-error" class="query-error" role="alert" hidden></p>
+<section aria-label="Response bytes over time">
+<div id="bandwidth-chart" class="bandwidth-chart"></div>
+<p id="bandwidth-empty" hidden>No responses in this range.</p>
+</section>
+<p id="chart-filter-note" class="note" hidden></p>
+<table class="bandwidth-table">
+<thead><tr><th id="group-column-header" scope="col"></th><th scope="col">Bytes</th><th scope="col">Share</th><th scope="col">Responses</th></tr></thead>
+<tbody id="bandwidth-rows"></tbody>
+</table>
+</main>
+</body>
+</html>

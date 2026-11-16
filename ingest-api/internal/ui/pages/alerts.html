@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alerts · scrapelog</title>
+<link rel="stylesheet" href="/assets/{{.AssetVersion}}/app.css">
+<script type="module" src="/assets/{{.AssetVersion}}/alerts.js"></script>
+</head>
+<body>
+{{template "topbar" .}}
+<main class="alerts">
+<div class="alerts-header">
+<h1>Alerts</h1>
+<a class="action-button" href="/alerts/new">New rule</a>
+</div>
+<p id="alerts-error" class="query-error" role="alert" hidden></p>
+<ul id="rule-list" class="rule-list"></ul>
+<p id="rules-empty" hidden>No alert rules yet. Create one to get a message when matching requests arrive.</p>
+<h2>Recent alerts</h2>
+<ul id="event-list" class="event-list"></ul>
+<p id="events-empty" hidden>No alerts have fired in the last 30 days.</p>
+</main>
+</body>
+</html>

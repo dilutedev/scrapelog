@@ -16,6 +16,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
+	"github.com/dilutedev/scrapelog/ingest-api/internal/alerts"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/apikeys"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/bodies"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
@@ -35,6 +36,14 @@ type RecordWriter interface {
 
 type BodyStore interface {
 	Store(ctx context.Context, records []ingest.Record) []bodies.Warning
+}
+
+type AlertMatcher interface {
+	MatchRecords(records []ingest.Record) []alerts.PendingAlert
+}
+
+type AlertQueue interface {
+	Enqueue(pendingAlerts []alerts.PendingAlert)
 }
 
 type recordError struct {
@@ -141,7 +150,7 @@ func writeRateLimited(responseWriter http.ResponseWriter, retryAfter time.Durati
 	writeError(responseWriter, http.StatusTooManyRequests, "rate limit exceeded")
 }
 
-func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, bodyStore BodyStore, recordLimiter *ratelimit.Limiter, diskGuard DiskGuard, loadedConfig config.Config) func(http.ResponseWriter, *http.Request, apikeys.Identity) {
+func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, bodyStore BodyStore, alertMatcher AlertMatcher, alertQueue AlertQueue, recordLimiter *ratelimit.Limiter, diskGuard DiskGuard, loadedConfig config.Config) func(http.ResponseWriter, *http.Request, apikeys.Identity) {
 	return func(responseWriter http.ResponseWriter, request *http.Request, identity apikeys.Identity) {
 		usage := diskGuard.Usage()
 		if usage.OverBudget() {
@@ -217,6 +226,7 @@ func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, bodyS
 		if usage.NearBudget() {
 			logger.Warn("clickhouse disk usage above 90% of budget", "used_bytes", usage.UsedBytes, "budget_bytes", usage.BudgetBytes)
 		}
+		pendingAlerts := alertMatcher.MatchRecords(records)
 		summary.Warnings = bodyStore.Store(request.Context(), records)
 		insertContext, cancel := context.WithTimeout(request.Context(), insertTimeout)
 		defer cancel()
@@ -226,6 +236,7 @@ func ingestRequestsHandler(logger *slog.Logger, recordWriter RecordWriter, bodyS
 			writeError(responseWriter, http.StatusServiceUnavailable, "clickhouse unavailable")
 			return
 		}
+		alertQueue.Enqueue(pendingAlerts)
 		writeJSON(responseWriter, http.StatusOK, summary)
 	}
 }

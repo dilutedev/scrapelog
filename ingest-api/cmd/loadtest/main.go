@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -28,11 +30,14 @@ type options struct {
 	targetRate    int
 	duration      time.Duration
 	batchSize     int
+	bodyBytes     int
 	adminToken    string
 	statusCounts  sync.Map
 	accepted      atomic.Int64
 	rejected      atomic.Int64
 	transportFail atomic.Int64
+	latencyMutex  sync.Mutex
+	latencies     []time.Duration
 }
 
 type createdKey struct {
@@ -53,6 +58,7 @@ type report struct {
 	Rejected        int64          `json:"rejected"`
 	StatusCounts    map[string]int `json:"status_counts"`
 	TransportErrors int64          `json:"transport_errors"`
+	P95Milliseconds float64        `json:"p95_ms"`
 }
 
 func main() {
@@ -66,6 +72,7 @@ func run() (exitCode int) {
 	flag.IntVar(&runOptions.targetRate, "rate", 50000, "total records per second")
 	flag.DurationVar(&runOptions.duration, "duration", 2*time.Minute, "how long to send")
 	flag.IntVar(&runOptions.batchSize, "batch", 5000, "records per request")
+	flag.IntVar(&runOptions.bodyBytes, "body-bytes", 0, "response body size in bytes added to every record, 0 sends no bodies")
 	flag.Parse()
 
 	if runOptions.adminToken == "" {
@@ -74,6 +81,10 @@ func run() (exitCode int) {
 	}
 	if runOptions.keyCount <= 0 || runOptions.targetRate <= 0 || runOptions.batchSize <= 0 || runOptions.duration <= 0 {
 		fmt.Fprintln(os.Stderr, "-keys, -rate, -batch and -duration must be positive")
+		return 2
+	}
+	if runOptions.bodyBytes < 0 {
+		fmt.Fprintln(os.Stderr, "-body-bytes must not be negative")
 		return 2
 	}
 
@@ -106,7 +117,7 @@ func run() (exitCode int) {
 		senderKeys = append(senderKeys, key.Key)
 	}
 
-	batchBody := buildBatchBody(runOptions.batchSize)
+	batchBody := buildBatchBody(runOptions.batchSize, runOptions.bodyBytes)
 	batchInterval := time.Duration(float64(time.Second) * float64(runOptions.batchSize) * float64(runOptions.keyCount) / float64(runOptions.targetRate))
 	startedAt := time.Now()
 	var senders sync.WaitGroup
@@ -129,6 +140,7 @@ func run() (exitCode int) {
 		Rejected:        runOptions.rejected.Load(),
 		StatusCounts:    map[string]int{},
 		TransportErrors: runOptions.transportFail.Load(),
+		P95Milliseconds: p95Milliseconds(runOptions.latencies),
 	}
 	allStatusesOK := true
 	runOptions.statusCounts.Range(func(status, count any) bool {
@@ -150,16 +162,31 @@ func run() (exitCode int) {
 	return 0
 }
 
-func buildBatchBody(batchSize int) []byte {
+func p95Milliseconds(latencies []time.Duration) float64 {
+	if len(latencies) == 0 {
+		return 0
+	}
+	sorted := append([]time.Duration(nil), latencies...)
+	sort.Slice(sorted, func(first, second int) bool { return sorted[first] < sorted[second] })
+	rank := (len(sorted)*95 + 99) / 100
+	return float64(sorted[rank-1]) / float64(time.Millisecond)
+}
+
+func buildBatchBody(batchSize int, bodyBytes int) []byte {
+	responseBody := strings.Repeat("x", bodyBytes)
 	records := make([]map[string]any, 0, batchSize)
 	for recordNumber := 0; recordNumber < batchSize; recordNumber++ {
-		records = append(records, map[string]any{
+		record := map[string]any{
 			"method":     "GET",
 			"url":        fmt.Sprintf("https://example.com/loadtest/%d", recordNumber),
 			"status":     200,
 			"latency_ms": 100 + recordNumber%200,
 			"scraper":    "loadtest",
-		})
+		}
+		if bodyBytes > 0 {
+			record["body"] = responseBody
+		}
+		records = append(records, record)
 	}
 	encodedRecords, _ := json.Marshal(records)
 	return encodedRecords
@@ -186,12 +213,16 @@ func sendBatch(client *http.Client, runOptions *options, apiKey string, batchBod
 	}
 	request.Header.Set("Authorization", "Bearer "+apiKey)
 	request.Header.Set("Content-Type", "application/json")
+	sentAt := time.Now()
 	response, err := client.Do(request)
 	if err != nil {
 		runOptions.transportFail.Add(1)
 		return
 	}
 	defer response.Body.Close()
+	runOptions.latencyMutex.Lock()
+	runOptions.latencies = append(runOptions.latencies, time.Since(sentAt))
+	runOptions.latencyMutex.Unlock()
 	counter, _ := runOptions.statusCounts.LoadOrStore(response.StatusCode, &atomic.Int64{})
 	counter.(*atomic.Int64).Add(1)
 	if response.StatusCode != http.StatusOK {
