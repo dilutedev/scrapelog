@@ -257,6 +257,49 @@ body {
   color: var(--status-5xx);
 }
 
+.empty-state {
+  margin: var(--space-4) 0;
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--graphite);
+  background: var(--sheet);
+  border: 1px dashed var(--rule-soft);
+  border-radius: var(--radius-m);
+}
+
+[aria-busy="true"] {
+  position: relative;
+}
+
+[aria-busy="true"]::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--focus), transparent);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  opacity: 0;
+  animation: busy-bar 1s linear 150ms infinite;
+}
+
+[aria-busy="true"] > * {
+  animation: busy-dim 0s 150ms forwards;
+}
+
+@keyframes busy-bar {
+  from { opacity: 1; background-position: -50% 0; }
+  to { opacity: 1; background-position: 150% 0; }
+}
+
+@keyframes busy-dim {
+  to { opacity: 0.6; }
+}
+
+@keyframes busy-dim-bar {
+  to { opacity: 1; }
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -715,6 +758,11 @@ body {
 
   :where(button, .action-button) {
     transition: none;
+  }
+
+  [aria-busy="true"]::before {
+    animation: busy-dim-bar 0s 150ms forwards;
+    background-size: 100% 100%;
   }
 }
 
