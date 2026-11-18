@@ -634,9 +634,11 @@ body {
   max-height: calc(100vh - var(--header-height));
   overflow: auto;
   box-sizing: border-box;
-  padding: 1rem 1.25rem;
+  padding: var(--space-4) var(--space-5);
   background: var(--sheet);
-  border-left: 1px solid var(--rule);
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-1);
   animation: slide-in 150ms ease-out;
 }
 
@@ -661,7 +663,9 @@ body {
 
 .detail-header {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: var(--space-2);
 }
 
 .detail-pane button {
@@ -698,7 +702,8 @@ body {
 
 .kv-table th {
   width: 9rem;
-  padding: 0.25rem 0.5rem 0.25rem 0;
+  padding: var(--space-1) var(--space-2);
+  background: var(--sunken);
   color: var(--graphite);
   font-size: var(--size-small);
   font-weight: 400;
@@ -706,8 +711,12 @@ body {
   vertical-align: top;
 }
 
+.kv-table tr + tr :is(th, td) {
+  border-top: 1px solid var(--rule-soft);
+}
+
 .kv-table td {
-  padding: 0.25rem 0;
+  padding: var(--space-1) var(--space-2);
   font-family: var(--font-mono);
   font-size: var(--size-small);
   overflow-wrap: anywhere;
@@ -987,6 +996,19 @@ body {
     inset: 0;
     z-index: 10;
     max-height: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .detail-header {
+    position: sticky;
+    top: calc(-1 * var(--space-4));
+    z-index: 1;
+    margin: calc(-1 * var(--space-4)) calc(-1 * var(--space-5)) var(--space-3);
+    padding: var(--space-2) var(--space-5);
+    background: var(--sheet);
+    border-bottom: 1px solid var(--rule-soft);
   }
 
   .back-button {
