@@ -423,22 +423,28 @@ body {
 }
 
 .tape {
-  margin-top: 1rem;
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--sheet);
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-1);
 }
 
 .tape-svg {
   display: block;
   width: 100%;
   height: 72px;
-  background: var(--sheet);
+  background: var(--sunken);
   animation: tape-fill 200ms ease-out;
-  touch-action: none;
+  touch-action: pan-y;
+  clip-path: inset(0 round 6px);
   cursor: crosshair;
 }
 
 @keyframes tape-fill {
-  from { clip-path: inset(0 100% 0 0); }
-  to { clip-path: inset(0); }
+  from { clip-path: inset(0 100% 0 0 round 6px); }
+  to { clip-path: inset(0 round 6px); }
 }
 
 .band.status-2xx { fill: var(--status-2xx); }
@@ -464,6 +470,7 @@ body {
 .tape-axis {
   display: flex;
   justify-content: space-between;
+  margin-top: var(--space-1);
   color: var(--graphite);
   font-size: var(--size-small);
 }
@@ -824,7 +831,7 @@ body {
   }
 
   .tape-svg {
-    height: 24px;
+    height: 40px;
   }
 
   .tape-volume {
