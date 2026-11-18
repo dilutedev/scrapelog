@@ -22,6 +22,7 @@ const stepSelect = document.getElementById("step-select");
 const headline = document.getElementById("bandwidth-headline");
 const errorMessage = document.getElementById("bandwidth-error");
 const chartContainer = document.getElementById("bandwidth-chart");
+const chartSection = chartContainer.parentElement;
 const emptyMessage = document.getElementById("bandwidth-empty");
 const filterNote = document.getElementById("chart-filter-note");
 const groupColumnHeader = document.getElementById("group-column-header");
@@ -231,6 +232,7 @@ async function loadProjects(range) {
 
 async function load() {
   const sequence = ++loadSequence;
+  chartSection.setAttribute("aria-busy", "true");
   filteredGroupIndex = null;
   const range = rangeParameters();
   const parameters = new URLSearchParams({ ...range, step: state.step, split: state.split });
@@ -243,6 +245,7 @@ async function load() {
     response = await apiFetch("/ui/api/bandwidth?" + parameters);
   } catch (error) {
     if (sequence === loadSequence) {
+      chartSection.removeAttribute("aria-busy");
       errorMessage.textContent = error.message;
       errorMessage.hidden = false;
     }
@@ -251,6 +254,7 @@ async function load() {
   if (sequence !== loadSequence) {
     return;
   }
+  chartSection.removeAttribute("aria-busy");
   errorMessage.hidden = true;
   loadedResponse = response;
   renderAll();
