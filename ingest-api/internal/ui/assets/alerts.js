@@ -12,6 +12,7 @@ const ruleList = document.getElementById("rule-list");
 const rulesEmpty = document.getElementById("rules-empty");
 const eventList = document.getElementById("event-list");
 const eventsEmpty = document.getElementById("events-empty");
+const pageElement = ruleList.parentElement;
 
 function startOfToday() {
   const today = new Date();
@@ -122,6 +123,7 @@ function renderEvent(alertEvent, todayStart) {
 async function load() {
   let rules;
   let events;
+  pageElement.setAttribute("aria-busy", "true");
   try {
     [rules, events] = await Promise.all([
       apiFetch("/ui/api/alert-rules"),
@@ -130,8 +132,10 @@ async function load() {
   } catch (error) {
     errorElement.textContent = error.message;
     errorElement.hidden = false;
+    pageElement.removeAttribute("aria-busy");
     return;
   }
+  pageElement.removeAttribute("aria-busy");
   const todayStart = startOfToday();
   const truncated = events.length === eventLimit && new Date(events[eventLimit - 1].fired_at) >= todayStart;
   rulesEmpty.hidden = rules.length > 0;
