@@ -1152,14 +1152,33 @@ body {
 .alerts,
 .alert-edit,
 .archive {
-  padding: 1rem 1.5rem;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-5);
   max-width: 60rem;
+}
+
+:is(.alerts, .alert-edit, .archive) h1 {
+  margin: var(--space-2) 0 var(--space-4);
+  font-size: var(--size-title);
+}
+
+:is(.alerts, .archive) h2 {
+  margin: var(--space-6) 0 var(--space-3);
+  font-size: var(--size-large);
 }
 
 .alerts-header {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.alerts-header h1 {
+  margin: 0;
 }
 
 .alerts-header a.action-button,
@@ -1172,28 +1191,61 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
+  background: var(--sheet);
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-1);
+}
+
+.rule-list:empty,
+.event-list:empty {
+  display: none;
 }
 
 .rule-list li,
 .event-list li {
-  padding: 0.5rem 0.5rem;
-  border-bottom: 1px solid var(--rule);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--rule-soft);
+  position: relative;
+}
+
+.rule-list li:last-child,
+.event-list li:last-child {
+  border-bottom: 0;
 }
 
 .rule-list li:hover,
 .event-list li:hover {
-  background: var(--sheet);
+  background: var(--paper);
 }
 
 .rule-list li {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: 0.25rem 1rem;
 }
 
+.rule-title {
+  font-weight: 600;
+}
+
+.rule-title a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.rule-title a:hover {
+  text-decoration: underline;
+}
+
 .rule-channel {
-  text-align: right;
+  justify-self: end;
+  padding: 0.125rem var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--sunken);
   color: var(--graphite);
+  font-size: var(--size-small);
 }
 
 .rule-sentence {
@@ -1206,8 +1258,17 @@ body {
   margin: 0;
 }
 
+.event-list summary {
+  cursor: pointer;
+  color: var(--focus);
+  margin-top: var(--space-1);
+}
+
 .sample-line {
   margin: 0.25rem 0 0;
+  padding: var(--space-2);
+  background: var(--paper);
+  border-radius: var(--radius-s);
   font-family: var(--font-mono);
   font-size: var(--size-small);
   overflow-wrap: anywhere;
@@ -1273,8 +1334,30 @@ body {
 
 @media (max-width: 759px) {
   .alerts,
-  .alert-edit {
-    padding: 1rem;
+  .alert-edit,
+  .archive {
+    padding: var(--space-4);
+  }
+
+  .alerts-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .alerts .rule-title a::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+  }
+
+  .event-list summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+
+  .archive .rule-list li {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .condition-rows li > * {
