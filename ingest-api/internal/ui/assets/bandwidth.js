@@ -4,14 +4,16 @@ import uPlot from "./vendor/uplot/uPlot.esm.js";
 const presetSeconds = { "24h": 86400, "7d": 604800, "30d": 2592000, "90d": 7776000 };
 const presetLabels = { "24h": "24 hours", "7d": "7 days", "30d": "30 days", "90d": "90 days" };
 const seriesColors = ["#4C6A85", "#8A6F4D", "#5E8C87", "#9A5E7A", "#6B7A3A", "#B07C6A", "#5D5A8C", "#7F8C99"];
-const otherSeriesColor = "#A3AAA4";
+const otherSeriesColor = "#868D87";
 const splitLabels = { proxy: "Proxy", project: "Project", scraper: "Scraper", domain: "Domain" };
 const stepValues = ["hour", "day"];
 const defaultState = { split: "proxy", project: "", range: "7d", step: "hour" };
 const axisStroke = "#5B6770";
-const gridStroke = "#C9CFC9";
+const gridStroke = "#DCE1DB";
 const desktopChartHeight = 320;
 const mobileChartHeight = 220;
+const desktopYAxisSize = 80;
+const mobileYAxisSize = 72;
 
 const splitSelect = document.getElementById("split-select");
 const projectSelect = document.getElementById("project-select");
@@ -78,6 +80,10 @@ function chartHeight() {
   return matchMedia("(max-width: 759px)").matches ? mobileChartHeight : desktopChartHeight;
 }
 
+function yAxisSize() {
+  return matchMedia("(max-width: 759px)").matches ? mobileYAxisSize : desktopYAxisSize;
+}
+
 function renderChart() {
   destroyChart();
   const { series, groups } = loadedResponse;
@@ -118,7 +124,7 @@ function renderChart() {
       scales: { y: { range: (plotInstance, minimum, maximum) => [0, maximum > 0 ? maximum * 1.05 : 1] } },
       axes: [
         { stroke: axisStroke, grid: { stroke: gridStroke, width: 1 }, ticks: { stroke: gridStroke } },
-        { stroke: axisStroke, size: 80, grid: { stroke: gridStroke, width: 1 }, ticks: { stroke: gridStroke }, values: (plotInstance, ticks) => ticks.map((tick) => formatBytes(tick)) },
+        { stroke: axisStroke, size: yAxisSize(), grid: { stroke: gridStroke, width: 1 }, ticks: { stroke: gridStroke }, values: (plotInstance, ticks) => ticks.map((tick) => formatBytes(tick)) },
       ],
       series: seriesOptions,
     },
@@ -261,9 +267,14 @@ for (const control of [splitSelect, projectSelect, rangeSelect, stepSelect]) {
 }
 
 new ResizeObserver(() => {
-  if (chart) {
-    chart.setSize({ width: chartContainer.clientWidth, height: chartHeight() });
+  if (!chart) {
+    return;
   }
+  if (chart.height !== chartHeight()) {
+    renderChart();
+    return;
+  }
+  chart.setSize({ width: chartContainer.clientWidth, height: chartHeight() });
 }).observe(chartContainer);
 
 window.addEventListener("popstate", () => {
