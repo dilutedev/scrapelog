@@ -21,6 +21,8 @@ const retentionNote = document.getElementById("retention-note");
 const explorerBody = document.getElementById("explorer-body");
 const resultsRows = document.getElementById("results-rows");
 const resultsEmpty = document.getElementById("results-empty");
+const resultsSection = resultsRows.closest("section");
+const tapeSection = tapeChart.parentElement;
 const loadOlderButton = document.getElementById("load-older");
 const detailPane = document.getElementById("detail-pane");
 
@@ -269,7 +271,8 @@ async function runSearch({ push }) {
   retentionNote.hidden = true;
   searchSequence += 1;
   const thisSearch = searchSequence;
-  resultsRows.parentElement.setAttribute("aria-busy", "true");
+  resultsSection.setAttribute("aria-busy", "true");
+  tapeSection.setAttribute("aria-busy", "true");
   resetDetailSelection();
 
   const parameters = { q: queryText, ...rangeParameters(), ...sourceParameters() };
@@ -280,7 +283,8 @@ async function runSearch({ push }) {
   if (thisSearch !== searchSequence) {
     return;
   }
-  resultsRows.parentElement.removeAttribute("aria-busy");
+  resultsSection.removeAttribute("aria-busy");
+  tapeSection.removeAttribute("aria-busy");
 
   clearRows();
   if (searchOutcome.status === "rejected") {

@@ -5,6 +5,7 @@ const pollIntervalMilliseconds = 3000;
 const errorElement = document.getElementById("archive-error");
 const disabledElement = document.getElementById("archive-disabled");
 const sectionsElement = document.getElementById("archive-sections");
+const pageElement = sectionsElement.parentElement;
 const archiveList = document.getElementById("archive-list");
 const archivesEmpty = document.getElementById("archives-empty");
 const restoreForm = document.getElementById("restore-form");
@@ -176,12 +177,15 @@ startButton.addEventListener("click", async () => {
 
 async function load() {
   let archives;
+  pageElement.setAttribute("aria-busy", "true");
   try {
     archives = await apiFetch("/ui/api/archives");
   } catch (error) {
     showError(errorElement, error.message);
+    pageElement.removeAttribute("aria-busy");
     return;
   }
+  pageElement.removeAttribute("aria-busy");
   if (!archives.archiving_enabled) {
     disabledElement.hidden = false;
     return;

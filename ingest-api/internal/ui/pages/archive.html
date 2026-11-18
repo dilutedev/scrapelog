@@ -12,11 +12,11 @@
 <main class="archive">
 <h1>Archive</h1>
 <p id="archive-error" class="query-error" role="alert" hidden></p>
-<p id="archive-disabled" hidden>Archiving is off. Set S3_ENDPOINT, S3_BUCKET and the S3 keys to archive requests to S3.</p>
+<p id="archive-disabled" class="empty-state" hidden>Archiving is off. Set S3_ENDPOINT, S3_BUCKET and the S3 keys to archive requests to S3.</p>
 <section id="archive-sections" hidden>
 <h2>Archived days</h2>
 <ul id="archive-list" class="rule-list"></ul>
-<p id="archives-empty" hidden>No days have been archived yet.</p>
+<p id="archives-empty" class="empty-state" hidden>No days have been archived yet.</p>
 <h2>Restore</h2>
 <form id="restore-form" class="rule-form">
 <label for="restore-from">From day (UTC)</label>
@@ -37,7 +37,7 @@
 <h2>Restores</h2>
 <p id="restores-error" class="query-error" role="alert" hidden></p>
 <ul id="restore-list" class="rule-list"></ul>
-<p id="restores-empty" hidden>No restores.</p>
+<p id="restores-empty" class="empty-state" hidden>No restores.</p>
 </section>
 </main>
 </body>

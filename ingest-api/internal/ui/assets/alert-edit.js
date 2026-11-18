@@ -263,6 +263,7 @@ async function start() {
     return;
   }
   try {
+    form.setAttribute("aria-busy", "true");
     const rules = await apiFetch(rulesPath);
     const rule = rules.find((candidate) => candidate.rule_id === segment);
     if (!rule) {
@@ -272,6 +273,8 @@ async function start() {
     renderRule(rule);
   } catch (error) {
     showUnavailable(error.message);
+  } finally {
+    form.removeAttribute("aria-busy");
   }
 }
 
