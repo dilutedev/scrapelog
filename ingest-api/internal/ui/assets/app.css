@@ -851,17 +851,26 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0;
+  padding: var(--space-1) var(--space-2);
+  margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-2));
   font: inherit;
   color: var(--ink);
   background: none;
   border: 0;
+  border-radius: var(--radius-s);
   min-height: 0;
+  min-width: 0;
   box-shadow: none;
+  text-align: left;
   cursor: pointer;
 }
 
+.group-toggle:hover {
+  background: var(--sunken);
+}
+
 .group-toggle[aria-pressed="true"] {
+  background: var(--focus-soft);
   font-weight: 600;
 }
 
@@ -869,7 +878,8 @@ body {
   display: inline-block;
   width: 0.75rem;
   height: 0.75rem;
-  border-radius: 2px;
+  flex: none;
+  border-radius: 3px;
 }
 
 .share-bar {
@@ -917,6 +927,10 @@ body {
 
   .bandwidth-controls select {
     width: 100%;
+  }
+
+  .group-toggle {
+    min-height: 44px;
   }
 
   .bandwidth-table,
