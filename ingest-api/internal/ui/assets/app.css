@@ -411,8 +411,12 @@ body {
 }
 
 .query-error {
-  margin: 0.5rem 0 0;
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-s);
   color: var(--status-5xx);
+  background: var(--sunken);
+  background: color-mix(in srgb, var(--status-5xx) 10%, var(--sheet));
 }
 
 .note,
