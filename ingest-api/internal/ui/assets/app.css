@@ -229,11 +229,16 @@ body {
 .login {
   display: flex;
   flex-direction: column;
-  max-width: 22rem;
-  width: 100%;
+  max-width: 24rem;
+  width: calc(100% - 2 * var(--space-4));
   box-sizing: border-box;
-  margin: 0 auto;
-  padding: 4rem 1.5rem;
+  margin: var(--space-7) auto;
+  padding: var(--space-6);
+  gap: 0;
+  background: var(--sheet);
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-1);
 }
 
 .login h1 {
@@ -245,7 +250,7 @@ body {
 .login form {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--space-3);
 }
 
 .login label {
@@ -254,7 +259,14 @@ body {
 
 .login #login-error {
   margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-s);
+  background: color-mix(in srgb, var(--status-5xx) 10%, var(--sheet));
   color: var(--status-5xx);
+}
+
+.login button {
+  width: 100%;
 }
 
 .empty-state {
