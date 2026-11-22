@@ -135,6 +135,32 @@ body {
   padding: var(--space-2) var(--space-3);
 }
 
+select,
+.export-menu summary {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--graphite) 50%),
+    linear-gradient(135deg, var(--graphite) 50%, transparent 50%);
+  background-position:
+    calc(100% - 1.25rem) 50%,
+    calc(100% - 0.9rem) 50%;
+  background-size: 0.4rem 0.4rem;
+  background-repeat: no-repeat;
+  padding-right: 2.25rem;
+}
+
+select {
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+
+@media (pointer: coarse) {
+  select,
+  .export-menu summary {
+    font-size: 16px;
+  }
+}
+
 :where(input:not([type="radio"]):not([type="checkbox"]), select, textarea):focus-visible {
   border-color: var(--focus);
   box-shadow: 0 0 0 3px var(--focus-soft);
@@ -469,6 +495,10 @@ body {
 
 .export-menu summary {
   list-style: none;
+}
+
+.export-menu summary::-webkit-details-marker {
+  display: none;
 }
 
 .export-menu-panel {
@@ -1123,7 +1153,7 @@ body {
   }
 
   .query-bar select {
-    flex: 1 1 0;
+    flex: 1 1 100%;
     min-width: 0;
   }
 
