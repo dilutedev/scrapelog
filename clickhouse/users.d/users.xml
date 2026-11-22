@@ -43,6 +43,7 @@
                 <query>GRANT INSERT, SELECT ON scrapelog.api_keys</query>
                 <query>GRANT INSERT, SELECT ON scrapelog.alert_rules</query>
                 <query>GRANT INSERT, SELECT ON scrapelog.alert_events</query>
+                <query>GRANT INSERT, SELECT ON scrapelog.users</query>
                 <query>GRANT SHOW TABLES ON scrapelog.*</query>
                 <query>GRANT SHOW TABLES ON system.*</query>
                 <query>GRANT SELECT ON system.parts</query>
