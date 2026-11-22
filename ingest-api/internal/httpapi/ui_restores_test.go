@@ -15,6 +15,7 @@ import (
 	"github.com/dilutedev/scrapelog/ingest-api/internal/archive"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/session"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/users"
 )
 
 type fakeRestoreService struct {
@@ -56,7 +57,7 @@ func restoreRequestWithSession(method string, target string, body string, withSe
 	request := httptest.NewRequest(method, target, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	if withSession {
-		request.AddCookie(&http.Cookie{Name: session.CookieName, Value: newTestSigner().Issue()})
+		request.AddCookie(&http.Cookie{Name: session.CookieName, Value: newTestSigner().Issue(users.AdminUsername, 0)})
 	}
 	return request
 }

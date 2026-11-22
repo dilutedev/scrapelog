@@ -21,6 +21,7 @@ import (
 	"github.com/dilutedev/scrapelog/ingest-api/internal/bodies"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/query"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/users"
 )
 
 type fakeRequestReader struct {
@@ -100,7 +101,7 @@ func newRequestsHandler(requestReader RequestReader, bodyGetter BodyGetter) http
 }
 
 func getWithSession(handler http.Handler, target string) *httptest.ResponseRecorder {
-	return serve(handler, cookieRequest(http.MethodGet, target, newTestSigner().Issue()))
+	return serve(handler, cookieRequest(http.MethodGet, target, newTestSigner().Issue(users.AdminUsername, 0)))
 }
 
 func timeRangeQuery(from time.Time, to time.Time) string {

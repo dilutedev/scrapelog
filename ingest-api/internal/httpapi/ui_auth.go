@@ -11,6 +11,7 @@ import (
 
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ratelimit"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/session"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/users"
 )
 
 const (
@@ -53,7 +54,11 @@ func requireSameOriginJSON(next http.HandlerFunc) http.HandlerFunc {
 
 func hasValidSession(signer *session.Signer, request *http.Request) bool {
 	cookie, err := request.Cookie(session.CookieName)
-	return err == nil && signer.Valid(cookie.Value)
+	if err != nil {
+		return false
+	}
+	_, valid := signer.Verify(cookie.Value)
+	return valid
 }
 
 func requireSession(signer *session.Signer, next http.HandlerFunc) http.HandlerFunc {
@@ -95,7 +100,7 @@ func loginHandler(signer *session.Signer, adminTokenHash [32]byte, loginLimiter 
 			writeError(responseWriter, http.StatusUnauthorized, wrongTokenMessage)
 			return
 		}
-		http.SetCookie(responseWriter, sessionCookie(request, signer.Issue(), int(session.Lifetime.Seconds())))
+		http.SetCookie(responseWriter, sessionCookie(request, signer.Issue(users.AdminUsername, 0), int(session.Lifetime.Seconds())))
 		responseWriter.WriteHeader(http.StatusNoContent)
 	}
 }

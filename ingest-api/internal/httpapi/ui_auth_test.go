@@ -16,6 +16,7 @@ import (
 
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/session"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/users"
 )
 
 const testAdminToken = "admin-token"
@@ -92,7 +93,7 @@ func TestLoginSetsSessionCookieOnCorrectToken(t *testing.T) {
 			if cookie.Secure != test.wantSecure {
 				t.Fatalf("Secure = %v, want %v", cookie.Secure, test.wantSecure)
 			}
-			if !newTestSigner().Valid(cookie.Value) {
+			if _, valid := newTestSigner().Verify(cookie.Value); !valid {
 				t.Fatal("issued cookie value is not valid")
 			}
 		})
@@ -231,14 +232,14 @@ func cookieRequest(method, target, cookieValue string) *http.Request {
 
 func TestSessionStatusReflectsCookieValidity(t *testing.T) {
 	expiredSigner := session.New(testAdminToken, func() time.Time { return time.Now().Add(-2 * session.Lifetime) })
-	validValue := newTestSigner().Issue()
+	validValue := newTestSigner().Issue(users.AdminUsername, 0)
 	tests := map[string]struct {
 		cookieValue string
 		wantStatus  int
 	}{
 		"valid":    {cookieValue: validValue, wantStatus: http.StatusNoContent},
 		"missing":  {cookieValue: "", wantStatus: http.StatusUnauthorized},
-		"expired":  {cookieValue: expiredSigner.Issue(), wantStatus: http.StatusUnauthorized},
+		"expired":  {cookieValue: expiredSigner.Issue(users.AdminUsername, 0), wantStatus: http.StatusUnauthorized},
 		"tampered": {cookieValue: validValue + "x", wantStatus: http.StatusUnauthorized},
 	}
 	for name, test := range tests {
@@ -259,7 +260,7 @@ func TestRequireSessionGuardsNextHandler(t *testing.T) {
 		wantStatus  int
 	}{
 		"without cookie": {cookieValue: "", wantCalled: false, wantStatus: http.StatusUnauthorized},
-		"with cookie":    {cookieValue: signer.Issue(), wantCalled: true, wantStatus: http.StatusOK},
+		"with cookie":    {cookieValue: signer.Issue(users.AdminUsername, 0), wantCalled: true, wantStatus: http.StatusOK},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -290,7 +291,7 @@ func TestRequireSessionPageRedirectsToLoginWithEscapedNext(t *testing.T) {
 		t.Fatal("next called without a session")
 	}
 
-	serve(guarded, cookieRequest(http.MethodGet, "/requests", signer.Issue()))
+	serve(guarded, cookieRequest(http.MethodGet, "/requests", signer.Issue(users.AdminUsername, 0)))
 	if !called {
 		t.Fatal("next not called with a valid session")
 	}

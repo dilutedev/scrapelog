@@ -16,6 +16,7 @@ import (
 	"github.com/dilutedev/scrapelog/ingest-api/internal/alerts"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/session"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/users"
 )
 
 const (
@@ -114,7 +115,7 @@ func newAlertsHandlerWithTester(store AlertStore, tester AlertTester) http.Handl
 func alertRequest(method string, target string, body string) *http.Request {
 	request := httptest.NewRequest(method, target, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
-	request.AddCookie(&http.Cookie{Name: session.CookieName, Value: newTestSigner().Issue()})
+	request.AddCookie(&http.Cookie{Name: session.CookieName, Value: newTestSigner().Issue(users.AdminUsername, 0)})
 	return request
 }
 

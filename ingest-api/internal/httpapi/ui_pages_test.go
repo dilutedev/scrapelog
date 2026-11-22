@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ui"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/users"
 )
 
 var versionedCSSPattern = regexp.MustCompile(`/assets/[0-9a-f]{12}/app\.css`)
@@ -87,7 +88,7 @@ func TestSessionGatedPageRedirectsOrRenders(t *testing.T) {
 		t.Fatalf("location %q, want %q", location, wantLocation)
 	}
 
-	withSession := serve(gatedPage, cookieRequest(http.MethodGet, "/requests?q=a", signer.Issue()))
+	withSession := serve(gatedPage, cookieRequest(http.MethodGet, "/requests?q=a", signer.Issue(users.AdminUsername, 0)))
 	if withSession.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200", withSession.Code)
 	}
@@ -111,7 +112,7 @@ func TestRequestsPageRequiresSession(t *testing.T) {
 }
 
 func TestRequestsPageRendersWithSession(t *testing.T) {
-	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/requests", newTestSigner().Issue()))
+	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/requests", newTestSigner().Issue(users.AdminUsername, 0)))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200", recorder.Code)
 	}
@@ -144,7 +145,7 @@ func TestBandwidthPageRequiresSession(t *testing.T) {
 }
 
 func TestBandwidthPageRendersWithSession(t *testing.T) {
-	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/bandwidth", newTestSigner().Issue()))
+	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/bandwidth", newTestSigner().Issue(users.AdminUsername, 0)))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200", recorder.Code)
 	}
@@ -200,7 +201,7 @@ func TestAlertPagesRenderWithSession(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, test.target, newTestSigner().Issue()))
+			recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, test.target, newTestSigner().Issue(users.AdminUsername, 0)))
 			if recorder.Code != http.StatusOK {
 				t.Fatalf("status %d, want 200", recorder.Code)
 			}
@@ -233,7 +234,7 @@ func TestArchivePageRequiresSession(t *testing.T) {
 }
 
 func TestArchivePageRendersWithSession(t *testing.T) {
-	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/archive", newTestSigner().Issue()))
+	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/archive", newTestSigner().Issue(users.AdminUsername, 0)))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200", recorder.Code)
 	}
