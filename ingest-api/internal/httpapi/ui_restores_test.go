@@ -15,6 +15,7 @@ import (
 	"github.com/dilutedev/scrapelog/ingest-api/internal/archive"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/session"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/users"
 )
 
 type fakeRestoreService struct {
@@ -49,14 +50,14 @@ func (service *fakeRestoreService) Delete(ctx context.Context, restoreID string)
 
 func newRestoresHandler(archivingEnabled bool, restoreService RestoreService) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, archivingEnabled, nil, nil, restoreService, config.Config{AdminToken: testAdminToken})
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, archivingEnabled, nil, nil, restoreService, &fakeUserDirectory{}, config.Config{AdminToken: testAdminToken})
 }
 
 func restoreRequestWithSession(method string, target string, body string, withSession bool) *http.Request {
 	request := httptest.NewRequest(method, target, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	if withSession {
-		request.AddCookie(&http.Cookie{Name: session.CookieName, Value: newTestSigner().Issue()})
+		request.AddCookie(&http.Cookie{Name: session.CookieName, Value: newTestSigner().Issue(users.AdminUsername, 0)})
 	}
 	return request
 }

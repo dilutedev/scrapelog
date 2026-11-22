@@ -16,21 +16,77 @@ import (
 
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/session"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/users"
 )
 
 const testAdminToken = "admin-token"
 
+type fakeUserDirectory struct {
+	records     map[string]users.Record
+	unavailable bool
+	verifyError error
+}
+
+func (directory *fakeUserDirectory) VerifyLogin(username string, password string) (users.Record, error) {
+	if directory.unavailable {
+		return users.Record{}, users.ErrUnavailable
+	}
+	if directory.verifyError != nil {
+		return users.Record{}, directory.verifyError
+	}
+	for _, record := range directory.records {
+		if record.Username == username {
+			return record, nil
+		}
+	}
+	return users.Record{}, users.ErrWrongCredentials
+}
+
+func (directory *fakeUserDirectory) Lookup(userID string) (users.Record, error) {
+	if directory.unavailable {
+		return users.Record{}, users.ErrUnavailable
+	}
+	record, found := directory.records[userID]
+	if !found {
+		return users.Record{}, users.ErrUserNotFound
+	}
+	return record, nil
+}
+
+func (directory *fakeUserDirectory) List() ([]users.Record, error) {
+	if directory.unavailable {
+		return nil, users.ErrUnavailable
+	}
+	return nil, nil
+}
+
+func (directory *fakeUserDirectory) Create(ctx context.Context, username string, password string, permissions []string) (users.Record, error) {
+	return users.Record{}, directory.verifyError
+}
+
+func (directory *fakeUserDirectory) Update(ctx context.Context, userID string, change users.Change) (users.Record, error) {
+	return users.Record{}, directory.verifyError
+}
+
 func newUIHandler() http.Handler {
+	return newUIHandlerWithUsers(&fakeUserDirectory{})
+}
+
+func adminSession() string {
+	return newTestSigner().Issue(users.AdminUsername, 0)
+}
+
+func newUIHandlerWithUsers(userDirectory UserDirectory) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, config.Config{AdminToken: testAdminToken})
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, userDirectory, config.Config{AdminToken: testAdminToken})
 }
 
 func newTestSigner() *session.Signer {
 	return session.New(testAdminToken, time.Now)
 }
 
-func loginRequestWith(token string, mutate func(*http.Request)) *http.Request {
-	body := `{"token":"` + token + `"}`
+func loginRequestWith(username string, password string, mutate func(*http.Request)) *http.Request {
+	body := `{"username":"` + username + `","password":"` + password + `"}`
 	request := httptest.NewRequest(http.MethodPost, "/ui/api/login", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	if mutate != nil {
@@ -74,7 +130,7 @@ func TestLoginSetsSessionCookieOnCorrectToken(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			recorder := serve(newUIHandler(), loginRequestWith(testAdminToken, func(request *http.Request) {
+			recorder := serve(newUIHandler(), loginRequestWith(users.AdminUsername, testAdminToken, func(request *http.Request) {
 				if test.forwardedProto != "" {
 					request.Header.Set("X-Forwarded-Proto", test.forwardedProto)
 				}
@@ -92,32 +148,84 @@ func TestLoginSetsSessionCookieOnCorrectToken(t *testing.T) {
 			if cookie.Secure != test.wantSecure {
 				t.Fatalf("Secure = %v, want %v", cookie.Secure, test.wantSecure)
 			}
-			if !newTestSigner().Valid(cookie.Value) {
+			if _, valid := newTestSigner().Verify(cookie.Value); !valid {
 				t.Fatal("issued cookie value is not valid")
 			}
 		})
 	}
 }
 
-func TestLoginRejectsWrongToken(t *testing.T) {
-	recorder := serve(newUIHandler(), loginRequestWith("wrong", nil))
+func TestLoginSignsInAdminWithAdminToken(t *testing.T) {
+	recorder := serve(newUIHandler(), loginRequestWith("  Admin ", testAdminToken, nil))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status %d, want 204", recorder.Code)
+	}
+	claims, valid := newTestSigner().Verify(findSessionCookie(t, recorder).Value)
+	if !valid || claims.Subject != users.AdminUsername || claims.SessionVersion != 0 {
+		t.Fatalf("claims %+v valid %v", claims, valid)
+	}
+}
 
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("status %d, want 401", recorder.Code)
+func TestLoginSignsInUserWithRecordIdentity(t *testing.T) {
+	directory := &fakeUserDirectory{records: map[string]users.Record{
+		"user-1": {UserID: "user-1", Username: "alice", SessionVersion: 4},
+	}}
+	recorder := serve(newUIHandlerWithUsers(directory), loginRequestWith("alice", "any password here", nil))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status %d, want 204", recorder.Code)
 	}
-	if got := errorMessage(t, recorder); got != wrongTokenMessage {
-		t.Fatalf("error %q, want %q", got, wrongTokenMessage)
+	claims, valid := newTestSigner().Verify(findSessionCookie(t, recorder).Value)
+	if !valid || claims.Subject != "user-1" || claims.SessionVersion != 4 {
+		t.Fatalf("claims %+v valid %v", claims, valid)
 	}
-	if findSessionCookie(t, recorder) != nil {
-		t.Fatal("cookie set on wrong token")
+}
+
+func TestLoginFailuresAreIdentical(t *testing.T) {
+	tests := map[string]struct {
+		directory *fakeUserDirectory
+		username  string
+		password  string
+	}{
+		"wrong admin token":  {directory: &fakeUserDirectory{}, username: users.AdminUsername, password: "wrong"},
+		"unknown user":       {directory: &fakeUserDirectory{verifyError: users.ErrWrongCredentials}, username: "nobody", password: "whatever password"},
+		"other verify error": {directory: &fakeUserDirectory{verifyError: users.ErrUserNotFound}, username: "alice", password: "whatever password"},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			recorder := serve(newUIHandlerWithUsers(test.directory), loginRequestWith(test.username, test.password, nil))
+			if recorder.Code != http.StatusUnauthorized {
+				t.Fatalf("status %d, want 401", recorder.Code)
+			}
+			if got := errorMessage(t, recorder); got != wrongCredentialsMessage {
+				t.Fatalf("error %q, want %q", got, wrongCredentialsMessage)
+			}
+			if findSessionCookie(t, recorder) != nil {
+				t.Fatal("cookie set on failed login")
+			}
+		})
+	}
+}
+
+func TestLoginWhenUsersUnavailable(t *testing.T) {
+	directory := &fakeUserDirectory{unavailable: true}
+	userLogin := serve(newUIHandlerWithUsers(directory), loginRequestWith("alice", "some password value", nil))
+	if userLogin.Code != http.StatusServiceUnavailable || errorMessage(t, userLogin) != usersUnavailableMessage {
+		t.Fatalf("user login status %d body %s", userLogin.Code, userLogin.Body.String())
+	}
+	adminLogin := serve(newUIHandlerWithUsers(directory), loginRequestWith(users.AdminUsername, testAdminToken, nil))
+	if adminLogin.Code != http.StatusNoContent {
+		t.Fatalf("admin login status %d, want 204", adminLogin.Code)
 	}
 }
 
 func TestLoginRejectsMalformedBodies(t *testing.T) {
 	tests := map[string]string{
-		"not json":    "nope",
-		"empty token": `{"token":""}`,
-		"no token":    `{}`,
+		"not json":         "nope",
+		"empty body":       `{}`,
+		"missing username": `{"password":"secret"}`,
+		"missing password": `{"username":"alice"}`,
+		"blank username":   `{"username":"  ","password":"secret"}`,
+		"old token body":   `{"token":"admin-token"}`,
 	}
 	for name, body := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -137,19 +245,19 @@ func TestLoginRateLimitsPerClientIP(t *testing.T) {
 		return func(request *http.Request) { request.Header.Set("X-Real-IP", address) }
 	}
 	for attempt := 1; attempt <= 10; attempt++ {
-		recorder := serve(handler, loginRequestWith("wrong", withRealIP("203.0.113.1")))
+		recorder := serve(handler, loginRequestWith(users.AdminUsername, "wrong", withRealIP("203.0.113.1")))
 		if recorder.Code != http.StatusUnauthorized {
 			t.Fatalf("attempt %d: status %d, want 401", attempt, recorder.Code)
 		}
 	}
-	limited := serve(handler, loginRequestWith("wrong", withRealIP("203.0.113.1")))
+	limited := serve(handler, loginRequestWith(users.AdminUsername, "wrong", withRealIP("203.0.113.1")))
 	if limited.Code != http.StatusTooManyRequests {
 		t.Fatalf("status %d, want 429", limited.Code)
 	}
 	if limited.Header().Get("Retry-After") == "" {
 		t.Fatal("missing Retry-After header")
 	}
-	other := serve(handler, loginRequestWith("wrong", withRealIP("203.0.113.2")))
+	other := serve(handler, loginRequestWith(users.AdminUsername, "wrong", withRealIP("203.0.113.2")))
 	if other.Code != http.StatusUnauthorized {
 		t.Fatalf("other client status %d, want 401", other.Code)
 	}
@@ -162,9 +270,9 @@ func TestLoginRateLimitFallsBackToRemoteAddrHost(t *testing.T) {
 	}
 	for attempt := 1; attempt <= 10; attempt++ {
 		address := "198.51.100.7:" + strconv.Itoa(40000+attempt)
-		serve(handler, loginRequestWith("wrong", withRemoteAddr(address)))
+		serve(handler, loginRequestWith(users.AdminUsername, "wrong", withRemoteAddr(address)))
 	}
-	recorder := serve(handler, loginRequestWith("wrong", withRemoteAddr("198.51.100.7:55555")))
+	recorder := serve(handler, loginRequestWith(users.AdminUsername, "wrong", withRemoteAddr("198.51.100.7:55555")))
 	if recorder.Code != http.StatusTooManyRequests {
 		t.Fatalf("status %d, want 429", recorder.Code)
 	}
@@ -231,14 +339,14 @@ func cookieRequest(method, target, cookieValue string) *http.Request {
 
 func TestSessionStatusReflectsCookieValidity(t *testing.T) {
 	expiredSigner := session.New(testAdminToken, func() time.Time { return time.Now().Add(-2 * session.Lifetime) })
-	validValue := newTestSigner().Issue()
+	validValue := newTestSigner().Issue(users.AdminUsername, 0)
 	tests := map[string]struct {
 		cookieValue string
 		wantStatus  int
 	}{
 		"valid":    {cookieValue: validValue, wantStatus: http.StatusNoContent},
 		"missing":  {cookieValue: "", wantStatus: http.StatusUnauthorized},
-		"expired":  {cookieValue: expiredSigner.Issue(), wantStatus: http.StatusUnauthorized},
+		"expired":  {cookieValue: expiredSigner.Issue(users.AdminUsername, 0), wantStatus: http.StatusUnauthorized},
 		"tampered": {cookieValue: validValue + "x", wantStatus: http.StatusUnauthorized},
 	}
 	for name, test := range tests {
@@ -259,12 +367,12 @@ func TestRequireSessionGuardsNextHandler(t *testing.T) {
 		wantStatus  int
 	}{
 		"without cookie": {cookieValue: "", wantCalled: false, wantStatus: http.StatusUnauthorized},
-		"with cookie":    {cookieValue: signer.Issue(), wantCalled: true, wantStatus: http.StatusOK},
+		"with cookie":    {cookieValue: signer.Issue(users.AdminUsername, 0), wantCalled: true, wantStatus: http.StatusOK},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			called := false
-			guarded := requireSession(signer, func(responseWriter http.ResponseWriter, request *http.Request) { called = true })
+			guarded := requireSession(signer, &fakeUserDirectory{}, func(responseWriter http.ResponseWriter, request *http.Request) { called = true })
 			recorder := serve(guarded, cookieRequest(http.MethodGet, "/ui/api/x", test.cookieValue))
 			if called != test.wantCalled || recorder.Code != test.wantStatus {
 				t.Fatalf("called=%v status=%d, want called=%v status=%d", called, recorder.Code, test.wantCalled, test.wantStatus)
@@ -276,10 +384,10 @@ func TestRequireSessionGuardsNextHandler(t *testing.T) {
 	}
 }
 
-func TestRequireSessionPageRedirectsToLoginWithEscapedNext(t *testing.T) {
+func TestRequirePagePermissionRedirectsToLoginWithEscapedNext(t *testing.T) {
 	signer := newTestSigner()
 	called := false
-	guarded := requireSessionPage(signer, func(responseWriter http.ResponseWriter, request *http.Request) { called = true })
+	guarded := requirePagePermission(signer, &fakeUserDirectory{}, []string{users.ViewRequests}, func(responseWriter http.ResponseWriter, request *http.Request) { called = true })
 
 	recorder := serve(guarded, cookieRequest(http.MethodGet, "/requests?q=status:500%20&x", ""))
 	wantLocation := "/login?next=" + url.QueryEscape("/requests?q=status:500%20&x")
@@ -290,7 +398,7 @@ func TestRequireSessionPageRedirectsToLoginWithEscapedNext(t *testing.T) {
 		t.Fatal("next called without a session")
 	}
 
-	serve(guarded, cookieRequest(http.MethodGet, "/requests", signer.Issue()))
+	serve(guarded, cookieRequest(http.MethodGet, "/requests", signer.Issue(users.AdminUsername, 0)))
 	if !called {
 		t.Fatal("next not called with a valid session")
 	}
@@ -298,7 +406,7 @@ func TestRequireSessionPageRedirectsToLoginWithEscapedNext(t *testing.T) {
 
 func TestUIAPIResponsesCarrySecurityHeaders(t *testing.T) {
 	tests := map[string]*http.Request{
-		"login success":     loginRequestWith(testAdminToken, nil),
+		"login success":     loginRequestWith(users.AdminUsername, testAdminToken, nil),
 		"login unsupported": httptest.NewRequest(http.MethodPost, "/ui/api/login", strings.NewReader("{}")),
 		"logout": func() *http.Request {
 			logoutRequest := httptest.NewRequest(http.MethodPost, "/ui/api/logout", nil)

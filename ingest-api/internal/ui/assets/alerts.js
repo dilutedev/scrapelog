@@ -1,4 +1,4 @@
-import { apiFetch } from "./shell.js";
+import { apiFetch, can } from "./shell.js";
 import { canFilter, formatQueryTerm } from "./requests-query.js";
 import { channelLabels, describeRule } from "./alert-rules.js";
 
@@ -49,10 +49,15 @@ function renderRule(rule, todayEvents, truncated) {
   marker.className = "rule-marker";
   marker.setAttribute("aria-hidden", "true");
   marker.textContent = rule.enabled ? "●" : "○";
-  const link = document.createElement("a");
-  link.href = "/alerts/" + encodeURIComponent(rule.rule_id);
-  link.textContent = rule.name;
-  heading.append(marker, " ", link);
+  heading.append(marker, " ");
+  if (can("manage_alerts")) {
+    const link = document.createElement("a");
+    link.href = "/alerts/" + encodeURIComponent(rule.rule_id);
+    link.textContent = rule.name;
+    heading.append(link);
+  } else {
+    heading.append(rule.name);
+  }
   if (!rule.enabled) {
     heading.append(" (paused)");
   }
@@ -73,7 +78,7 @@ function renderSample(sample) {
   if (sample.body_snippet) {
     text += ` body: "${sample.body_snippet}"`;
   }
-  if (!canFilter("id", sample.request_id)) {
+  if (!can("view_requests") || !canFilter("id", sample.request_id)) {
     line.append(`${text} (request id: ${sample.request_id})`);
     return line;
   }

@@ -10,12 +10,13 @@ import (
 	"testing"
 
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ui"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/users"
 )
 
 var versionedCSSPattern = regexp.MustCompile(`/assets/[0-9a-f]{12}/app\.css`)
 
-func TestRootRedirectsToRequests(t *testing.T) {
-	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/", ""))
+func TestRootRedirectsAdminToRequests(t *testing.T) {
+	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/", userSession(users.AdminUsername, 0)))
 	if recorder.Code != http.StatusFound {
 		t.Fatalf("status %d, want 302", recorder.Code)
 	}
@@ -33,7 +34,7 @@ func TestLoginPageRendersWithoutSession(t *testing.T) {
 		t.Fatalf("content type %q, want text/html", contentType)
 	}
 	body := recorder.Body.String()
-	if !strings.Contains(body, `id="admin-token"`) || !strings.Contains(body, "login.js") || !versionedCSSPattern.MatchString(body) {
+	if !strings.Contains(body, `id="login-username"`) || !strings.Contains(body, "login.js") || !versionedCSSPattern.MatchString(body) {
 		t.Fatalf("login page is missing expected content:\n%s", body)
 	}
 	for _, forbidden := range []string{"<script>", "style=", " onclick=", " onsubmit=", " onload="} {
@@ -76,7 +77,7 @@ func TestUIPagesAndAssetsCarrySecurityHeaders(t *testing.T) {
 func TestSessionGatedPageRedirectsOrRenders(t *testing.T) {
 	signer := newTestSigner()
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	gatedPage := withSecurityHeaders(requireSessionPage(signer, ui.PageHandler(logger, "login")))
+	gatedPage := withSecurityHeaders(requirePagePermission(signer, &fakeUserDirectory{}, []string{users.ViewRequests}, ui.PageHandler(logger, "login")))
 
 	withoutSession := serve(gatedPage, cookieRequest(http.MethodGet, "/requests?q=a", ""))
 	if withoutSession.Code != http.StatusFound {
@@ -87,11 +88,11 @@ func TestSessionGatedPageRedirectsOrRenders(t *testing.T) {
 		t.Fatalf("location %q, want %q", location, wantLocation)
 	}
 
-	withSession := serve(gatedPage, cookieRequest(http.MethodGet, "/requests?q=a", signer.Issue()))
+	withSession := serve(gatedPage, cookieRequest(http.MethodGet, "/requests?q=a", signer.Issue(users.AdminUsername, 0)))
 	if withSession.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200", withSession.Code)
 	}
-	if !strings.Contains(withSession.Body.String(), `id="admin-token"`) {
+	if !strings.Contains(withSession.Body.String(), `id="login-username"`) {
 		t.Fatal("page not rendered with a valid session")
 	}
 }
@@ -111,7 +112,7 @@ func TestRequestsPageRequiresSession(t *testing.T) {
 }
 
 func TestRequestsPageRendersWithSession(t *testing.T) {
-	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/requests", newTestSigner().Issue()))
+	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/requests", newTestSigner().Issue(users.AdminUsername, 0)))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200", recorder.Code)
 	}
@@ -144,7 +145,7 @@ func TestBandwidthPageRequiresSession(t *testing.T) {
 }
 
 func TestBandwidthPageRendersWithSession(t *testing.T) {
-	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/bandwidth", newTestSigner().Issue()))
+	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/bandwidth", newTestSigner().Issue(users.AdminUsername, 0)))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200", recorder.Code)
 	}
@@ -200,7 +201,7 @@ func TestAlertPagesRenderWithSession(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, test.target, newTestSigner().Issue()))
+			recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, test.target, newTestSigner().Issue(users.AdminUsername, 0)))
 			if recorder.Code != http.StatusOK {
 				t.Fatalf("status %d, want 200", recorder.Code)
 			}
@@ -233,7 +234,7 @@ func TestArchivePageRequiresSession(t *testing.T) {
 }
 
 func TestArchivePageRendersWithSession(t *testing.T) {
-	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/archive", newTestSigner().Issue()))
+	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/archive", newTestSigner().Issue(users.AdminUsername, 0)))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200", recorder.Code)
 	}

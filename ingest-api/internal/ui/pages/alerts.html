@@ -12,7 +12,7 @@
 <main class="alerts">
 <div class="alerts-header">
 <h1>Alerts</h1>
-<a class="action-button" href="/alerts/new">New rule</a>
+{{if .Can "manage_alerts"}}<a class="action-button" href="/alerts/new">New rule</a>{{end}}
 </div>
 <p id="alerts-error" class="query-error" role="alert" hidden></p>
 <ul id="rule-list" class="rule-list"></ul>

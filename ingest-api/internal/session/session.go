@@ -25,29 +25,41 @@ func New(adminToken string, now func() time.Time) *Signer {
 	return &Signer{key: keyDeriver.Sum(nil), now: now}
 }
 
-func (signer *Signer) Issue() string {
-	expiry := strconv.FormatInt(signer.now().Add(Lifetime).Unix(), 10)
-	return expiry + "." + base64.RawURLEncoding.EncodeToString(signer.mac(expiry))
+type Claims struct {
+	Subject        string
+	SessionVersion uint32
 }
 
-func (signer *Signer) Valid(value string) bool {
-	separatorIndex := strings.LastIndex(value, ".")
-	if separatorIndex <= 0 || separatorIndex == len(value)-1 {
-		return false
+func (signer *Signer) Issue(subject string, sessionVersion uint32) string {
+	expiry := strconv.FormatInt(signer.now().Add(Lifetime).Unix(), 10)
+	signedPart := subject + "." + strconv.FormatUint(uint64(sessionVersion), 10) + "." + expiry
+	return signedPart + "." + base64.RawURLEncoding.EncodeToString(signer.mac(signedPart))
+}
+
+func (signer *Signer) Verify(value string) (Claims, bool) {
+	parts := strings.Split(value, ".")
+	if len(parts) != 4 || parts[0] == "" {
+		return Claims{}, false
 	}
-	expiryText := value[:separatorIndex]
-	expiry, err := strconv.ParseInt(expiryText, 10, 64)
+	presentedMAC, err := base64.RawURLEncoding.DecodeString(parts[3])
 	if err != nil {
-		return false
+		return Claims{}, false
 	}
-	presentedMAC, err := base64.RawURLEncoding.DecodeString(value[separatorIndex+1:])
+	if !hmac.Equal(presentedMAC, signer.mac(value[:strings.LastIndex(value, ".")])) {
+		return Claims{}, false
+	}
+	sessionVersion, err := strconv.ParseUint(parts[1], 10, 32)
 	if err != nil {
-		return false
+		return Claims{}, false
 	}
-	if !hmac.Equal(presentedMAC, signer.mac(expiryText)) {
-		return false
+	expiry, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		return Claims{}, false
 	}
-	return signer.now().Unix() < expiry
+	if signer.now().Unix() >= expiry {
+		return Claims{}, false
+	}
+	return Claims{Subject: parts[0], SessionVersion: uint32(sessionVersion)}, true
 }
 
 func (signer *Signer) mac(message string) []byte {

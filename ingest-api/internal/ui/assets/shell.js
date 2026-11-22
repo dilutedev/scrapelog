@@ -10,6 +10,12 @@ document.getElementById("sign-out").addEventListener("click", async () => {
   } catch {}
 });
 
+const grantedPermissions = document.querySelector(".topbar").dataset.permissions.split(" ");
+
+export function can(permission) {
+  return grantedPermissions.includes(permission);
+}
+
 const byteUnits = ["KiB", "MiB", "GiB", "TiB"];
 
 export const networkErrorMessage = "Couldn't reach the server. Check your connection and try again.";

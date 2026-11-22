@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/dilutedev/scrapelog/ingest-api/internal/users"
 )
 
 func serveAsset(target string) *httptest.ResponseRecorder {
@@ -88,7 +90,7 @@ func TestTopbarMarksCurrentSection(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			var rendered bytes.Buffer
-			if err := pageTemplates.ExecuteTemplate(&rendered, "topbar", pageData{AssetVersion: "v", Page: test.page}); err != nil {
+			if err := pageTemplates.ExecuteTemplate(&rendered, "topbar", pageData{AssetVersion: "v", Page: test.page, Viewer: Viewer{IsAdmin: true, Permissions: []string{"view_requests", "view_bandwidth", "view_alerts", "manage_alerts", "view_archives"}}}); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			output := rendered.String()
@@ -159,5 +161,48 @@ func TestVendoredUPlotIsServed(t *testing.T) {
 				t.Fatal("empty body")
 			}
 		})
+	}
+}
+
+func TestTopbarShowsUsersLinkOnlyToAdmin(t *testing.T) {
+	tests := map[string]struct {
+		viewer   Viewer
+		wantLink bool
+	}{
+		"admin":     {viewer: Viewer{IsAdmin: true}, wantLink: true},
+		"non-admin": {viewer: Viewer{Username: "alice", Permissions: users.AllPermissions}, wantLink: false},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			var rendered bytes.Buffer
+			if err := pageTemplates.ExecuteTemplate(&rendered, "topbar", pageData{AssetVersion: "v", Page: "users", Viewer: test.viewer}); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			hasLink := strings.Contains(rendered.String(), `<a href="/users" aria-current="page">Users</a>`)
+			if hasLink != test.wantLink {
+				t.Fatalf("Users link present = %v, want %v:\n%s", hasLink, test.wantLink, rendered.String())
+			}
+		})
+	}
+}
+
+func TestUsersPageRendersFormAndEveryPermission(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := pageTemplates.ExecuteTemplate(&rendered, "users.html", pageData{AssetVersion: "v", Page: "users", Viewer: Viewer{IsAdmin: true}}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	output := rendered.String()
+	for _, fragment := range []string{`/assets/v/users.js`, `id="user-form"`, `id="user-list"`} {
+		if !strings.Contains(output, fragment) {
+			t.Errorf("output missing %q", fragment)
+		}
+	}
+	for _, permission := range users.AllPermissions {
+		if !strings.Contains(output, `name="permission" value="`+permission+`"`) {
+			t.Errorf("output missing a checkbox for %q", permission)
+		}
+	}
+	if got := strings.Count(output, `name="permission"`); got != len(users.AllPermissions) {
+		t.Errorf("checkbox count = %d, want %d", got, len(users.AllPermissions))
 	}
 }

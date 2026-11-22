@@ -21,6 +21,7 @@ import (
 	"github.com/dilutedev/scrapelog/ingest-api/internal/bodies"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/query"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/users"
 )
 
 type fakeRequestReader struct {
@@ -96,11 +97,11 @@ func (getter *fakeBodyGetter) Get(ctx context.Context, key string) ([]byte, erro
 
 func newRequestsHandler(requestReader RequestReader, bodyGetter BodyGetter) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, requestReader, bodyGetter, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, config.Config{AdminToken: testAdminToken})
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, requestReader, bodyGetter, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, &fakeUserDirectory{}, config.Config{AdminToken: testAdminToken})
 }
 
 func getWithSession(handler http.Handler, target string) *httptest.ResponseRecorder {
-	return serve(handler, cookieRequest(http.MethodGet, target, newTestSigner().Issue()))
+	return serve(handler, cookieRequest(http.MethodGet, target, newTestSigner().Issue(users.AdminUsername, 0)))
 }
 
 func timeRangeQuery(from time.Time, to time.Time) string {

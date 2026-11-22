@@ -23,6 +23,7 @@ import (
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ingest"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/query"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/storage"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/users"
 )
 
 const listenAddress = ":8080"
@@ -148,6 +149,12 @@ func serve() int {
 		logger.Error("loading alert rules failed", "error", err)
 	}
 	cancelAlertStartup()
+	userDirectory := users.NewDirectory(users.NewStore(connection))
+	userStartupContext, cancelUserStartup := context.WithTimeout(signalContext, 10*time.Second)
+	if err := userDirectory.Load(userStartupContext); err != nil {
+		logger.Error("loading users failed: apply clickhouse/initdb/005_users.sql and the scrapelog.users grant, then restart", "error", err)
+	}
+	cancelUserStartup()
 	go keyCache.RunRefreshLoop(signalContext, logger)
 	go alertCache.RunRefreshLoop(signalContext, logger)
 	go alertDispatcher.Run()
@@ -167,7 +174,7 @@ func serve() int {
 
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, requestReader, bodyGetter, alertStore, alertCache, alertDispatcher, alertCache, alertDispatcher, archivingEnabled, archiveLister, archiveDownloader, restoreService, loadedConfig),
+		Handler:           httpapi.NewHandler(signalContext, logger, connection, keyStore, keyCache, recordWriter, bodyStore, storageStore, diskGuard, requestReader, bodyGetter, alertStore, alertCache, alertDispatcher, alertCache, alertDispatcher, archivingEnabled, archiveLister, archiveDownloader, restoreService, userDirectory, loadedConfig),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

@@ -11,8 +11,10 @@
 <main class="login">
 <h1>scrapelog</h1>
 <form id="login-form" method="post">
-<label for="admin-token">Admin token</label>
-<input id="admin-token" name="token" type="password" autocomplete="current-password" required autofocus>
+<label for="login-username">Username</label>
+<input id="login-username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
+<label for="login-password">Password</label>
+<input id="login-password" name="password" type="password" autocomplete="current-password" required>
 <p id="login-error" role="alert" hidden></p>
 <button type="submit">Sign in</button>
 </form>
