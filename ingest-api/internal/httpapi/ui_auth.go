@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -29,6 +30,9 @@ var errNoSession = errors.New("no valid session")
 type UserDirectory interface {
 	VerifyLogin(username string, password string) (users.Record, error)
 	Lookup(userID string) (users.Record, error)
+	List() ([]users.Record, error)
+	Create(ctx context.Context, username string, password string, permissions []string) (users.Record, error)
+	Update(ctx context.Context, userID string, change users.Change) (users.Record, error)
 }
 
 type loginRequest struct {

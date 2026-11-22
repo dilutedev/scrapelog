@@ -53,6 +53,21 @@ func (directory *fakeUserDirectory) Lookup(userID string) (users.Record, error) 
 	return record, nil
 }
 
+func (directory *fakeUserDirectory) List() ([]users.Record, error) {
+	if directory.unavailable {
+		return nil, users.ErrUnavailable
+	}
+	return nil, nil
+}
+
+func (directory *fakeUserDirectory) Create(ctx context.Context, username string, password string, permissions []string) (users.Record, error) {
+	return users.Record{}, directory.verifyError
+}
+
+func (directory *fakeUserDirectory) Update(ctx context.Context, userID string, change users.Change) (users.Record, error) {
+	return users.Record{}, directory.verifyError
+}
+
 func newUIHandler() http.Handler {
 	return newUIHandlerWithUsers(&fakeUserDirectory{})
 }
