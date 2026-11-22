@@ -297,6 +297,21 @@ body {
   width: 100%;
 }
 
+.forbidden {
+  border-style: dashed;
+  text-align: left;
+  gap: var(--space-3);
+}
+
+.forbidden p {
+  margin: 0;
+  color: var(--graphite);
+}
+
+.forbidden .action-button {
+  align-self: flex-start;
+}
+
 .empty-state {
   margin: var(--space-4) 0;
   padding: var(--space-6);

@@ -124,6 +124,41 @@ func assetTreeVersion() string {
 	return hex.EncodeToString(treeHash.Sum(nil))[:12]
 }
 
+func firstLink(viewer Viewer) (navigationLink, bool) {
+	links := pageData{Viewer: viewer}.NavigationLinks()
+	if len(links) == 0 {
+		return navigationLink{}, false
+	}
+	return links[0], true
+}
+
+func HomePath(viewer Viewer) (string, bool) {
+	link, found := firstLink(viewer)
+	return link.Path, found
+}
+
+func (data pageData) HomePath() string {
+	link, _ := firstLink(data.Viewer)
+	return link.Path
+}
+
+func (data pageData) HomeLabel() string {
+	link, _ := firstLink(data.Viewer)
+	return link.Label
+}
+
+func WriteForbidden(responseWriter http.ResponseWriter, viewer Viewer) {
+	var rendered bytes.Buffer
+	renderError := pageTemplates.ExecuteTemplate(&rendered, "forbidden.html", pageData{AssetVersion: assetVersion, Page: "forbidden", Viewer: viewer})
+	if renderError != nil {
+		http.Error(responseWriter, "You don't have permission to open this page.", http.StatusForbidden)
+		return
+	}
+	responseWriter.Header().Set("Content-Type", "text/html; charset=utf-8")
+	responseWriter.WriteHeader(http.StatusForbidden)
+	responseWriter.Write(rendered.Bytes())
+}
+
 func AssetHandler() http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, request *http.Request) {
 		relativePath, found := strings.CutPrefix(request.URL.Path, "/assets/"+assetVersion+"/")

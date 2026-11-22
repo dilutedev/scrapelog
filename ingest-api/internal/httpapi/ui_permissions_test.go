@@ -48,7 +48,7 @@ var permissionMatrix = []permissionRoute{
 	{pattern: "GET /requests", page: true, anyOf: []string{users.ViewRequests}},
 	{pattern: "GET /bandwidth", page: true, anyOf: []string{users.ViewBandwidth}},
 	{pattern: "GET /alerts", page: true, anyOf: []string{users.ViewAlerts, users.ManageAlerts}},
-	{pattern: "GET /alerts/{rule_id}", page: true, anyOf: []string{users.ViewAlerts, users.ManageAlerts}},
+	{pattern: "GET /alerts/{rule_id}", page: true, anyOf: []string{users.ManageAlerts}},
 	{pattern: "GET /archive", page: true, anyOf: []string{users.ViewArchives, users.EstimateRestores, users.ManageRestores}},
 }
 

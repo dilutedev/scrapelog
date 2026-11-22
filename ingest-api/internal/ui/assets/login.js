@@ -1,4 +1,4 @@
-const defaultDestination = "/requests";
+const defaultDestination = "/";
 
 function safeNextPath(candidate) {
   if (typeof candidate !== "string" || !candidate.startsWith("/")) {

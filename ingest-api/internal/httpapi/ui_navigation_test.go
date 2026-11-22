@@ -97,3 +97,87 @@ func TestNavigationLinksMatchPagesTheUserCanOpen(t *testing.T) {
 		}
 	}
 }
+
+func forbiddenDirectory() *fakeUserDirectory {
+	return &fakeUserDirectory{records: map[string]users.Record{
+		"user-none":      {UserID: "user-none", Username: "nobody", SessionVersion: 1},
+		"user-bandwidth": {UserID: "user-bandwidth", Username: "bob", Permissions: []string{users.ViewBandwidth}, SessionVersion: 1},
+	}}
+}
+
+func TestForbiddenPageLinksToFirstPermittedPage(t *testing.T) {
+	recorder := serve(newPermissionHandler(forbiddenDirectory()), cookieRequest(http.MethodGet, "/requests", userSession("user-bandwidth", 1)))
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status %d, want 403", recorder.Code)
+	}
+	if contentType := recorder.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "text/html") {
+		t.Fatalf("content type %q, want text/html", contentType)
+	}
+	body := recorder.Body.String()
+	for _, fragment := range []string{"You don't have access to this page", `<a class="action-button" href="/bandwidth">Open Bandwidth</a>`, `class="topbar-user" title="bob">bob<`} {
+		if !strings.Contains(body, fragment) {
+			t.Fatalf("body missing %q:\n%s", fragment, body)
+		}
+	}
+	var gotLinks []string
+	for _, match := range navigationHrefPattern.FindAllStringSubmatch(body, -1) {
+		gotLinks = append(gotLinks, match[1])
+	}
+	if !slices.Equal(gotLinks, []string{"/bandwidth"}) {
+		t.Fatalf("links %v, want [/bandwidth]", gotLinks)
+	}
+}
+
+func TestForbiddenPageForUserWithoutPermissions(t *testing.T) {
+	handler := newPermissionHandler(forbiddenDirectory())
+	for _, target := range []string{"/", "/requests", "/archive"} {
+		t.Run(target, func(t *testing.T) {
+			recorder := serve(handler, cookieRequest(http.MethodGet, target, userSession("user-none", 1)))
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("status %d, want 403", recorder.Code)
+			}
+			body := recorder.Body.String()
+			if !strings.Contains(body, "Your account has no access yet") || strings.Contains(body, "action-button") {
+				t.Fatalf("unexpected body:\n%s", body)
+			}
+			if len(navigationHrefPattern.FindAllString(body, -1)) != 0 {
+				t.Fatalf("nav links rendered for a user without permissions:\n%s", body)
+			}
+		})
+	}
+}
+
+func TestRootRedirectsToFirstPermittedPage(t *testing.T) {
+	tests := map[string]struct {
+		permissions  []string
+		wantLocation string
+	}{
+		"view requests":          {permissions: []string{users.ViewRequests}, wantLocation: "/requests"},
+		"view bandwidth":         {permissions: []string{users.ViewBandwidth}, wantLocation: "/bandwidth"},
+		"manage alerts":          {permissions: []string{users.ManageAlerts}, wantLocation: "/alerts"},
+		"estimate restores":      {permissions: []string{users.EstimateRestores}, wantLocation: "/archive"},
+		"requests and bandwidth": {permissions: []string{users.ViewBandwidth, users.ViewRequests}, wantLocation: "/requests"},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			directory := &fakeUserDirectory{records: map[string]users.Record{
+				"user-a": {UserID: "user-a", Username: "a", Permissions: test.permissions, SessionVersion: 1},
+			}}
+			recorder := serve(newPermissionHandler(directory), cookieRequest(http.MethodGet, "/", userSession("user-a", 1)))
+			if recorder.Code != http.StatusFound || recorder.Header().Get("Location") != test.wantLocation {
+				t.Fatalf("status %d location %q, want 302 %q", recorder.Code, recorder.Header().Get("Location"), test.wantLocation)
+			}
+		})
+	}
+}
+
+func TestRootWithoutSessionOrUsersDirectory(t *testing.T) {
+	withoutCookie := serve(newPermissionHandler(&fakeUserDirectory{}), cookieRequest(http.MethodGet, "/", ""))
+	if withoutCookie.Code != http.StatusFound || withoutCookie.Header().Get("Location") != "/login" {
+		t.Fatalf("status %d location %q, want 302 /login", withoutCookie.Code, withoutCookie.Header().Get("Location"))
+	}
+	unavailable := serve(newPermissionHandler(&fakeUserDirectory{unavailable: true}), cookieRequest(http.MethodGet, "/", userSession("user-a", 1)))
+	if unavailable.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d, want 503", unavailable.Code)
+	}
+}

@@ -15,8 +15,8 @@ import (
 
 var versionedCSSPattern = regexp.MustCompile(`/assets/[0-9a-f]{12}/app\.css`)
 
-func TestRootRedirectsToRequests(t *testing.T) {
-	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/", ""))
+func TestRootRedirectsAdminToRequests(t *testing.T) {
+	recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, "/", userSession(users.AdminUsername, 0)))
 	if recorder.Code != http.StatusFound {
 		t.Fatalf("status %d, want 302", recorder.Code)
 	}

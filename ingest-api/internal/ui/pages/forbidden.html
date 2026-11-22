@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>No access · scrapelog</title>
+<link rel="stylesheet" href="/assets/{{.AssetVersion}}/app.css">
+</head>
+<body>
+{{template "topbar" .}}
+{{if .HomePath}}<main class="login forbidden">
+<h1>You don't have access to this page</h1>
+<p>Your account can't open it. Ask an admin if you need it.</p>
+<a class="action-button" href="{{.HomePath}}">Open {{.HomeLabel}}</a>
+</main>{{else}}<main class="login forbidden">
+<h1>Your account has no access yet</h1>
+<p>An admin needs to give your account permissions before you can use the dashboard.</p>
+</main>{{end}}
+</body>
+</html>

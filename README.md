@@ -213,7 +213,7 @@ All need the admin token. The `scrapelog keys` command inside the `ingest-api` c
 
 ### Sign in
 
-Open `/` (it redirects to `/requests`) and sign in as `admin` with `ADMIN_TOKEN` as the password, or as a user account with its password. Permissions are checked on every request:
+Open `/` (it goes to the sign-in page, or to your first permitted page when you are already signed in) and sign in as `admin` with `ADMIN_TOKEN` as the password, or as a user account with its password. Permissions are checked on every request:
 
 - A permission change applies on the user's next request.
 - A password reset or a disable ends that user's sessions.

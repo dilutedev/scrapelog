@@ -151,10 +151,30 @@ func requirePagePermission(signer *session.Signer, userDirectory UserDirectory, 
 			return
 		}
 		if !sessionPrincipal.allows(anyOf) {
-			http.Error(responseWriter, "You don't have permission to open this page.", http.StatusForbidden)
+			ui.WriteForbidden(responseWriter, sessionPrincipal.viewer())
 			return
 		}
 		next(responseWriter, request.WithContext(ui.WithViewer(request.Context(), sessionPrincipal.viewer())))
+	}
+}
+
+func homeHandler(signer *session.Signer, userDirectory UserDirectory) http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, request *http.Request) {
+		sessionPrincipal, err := resolvePrincipal(signer, userDirectory, request)
+		if errors.Is(err, users.ErrUnavailable) {
+			http.Error(responseWriter, usersUnavailableMessage, http.StatusServiceUnavailable)
+			return
+		}
+		if err != nil {
+			http.Redirect(responseWriter, request, "/login", http.StatusFound)
+			return
+		}
+		homePath, found := ui.HomePath(sessionPrincipal.viewer())
+		if !found {
+			ui.WriteForbidden(responseWriter, sessionPrincipal.viewer())
+			return
+		}
+		http.Redirect(responseWriter, request, homePath, http.StatusFound)
 	}
 }
 
