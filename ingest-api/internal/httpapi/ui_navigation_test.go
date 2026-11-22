@@ -16,7 +16,7 @@ var (
 	topbarPermissionsPattern = regexp.MustCompile(`data-permissions="([^"]*)"`)
 )
 
-var navigationPaths = []string{"/requests", "/bandwidth", "/alerts", "/archive"}
+var navigationPaths = []string{"/requests", "/bandwidth", "/alerts", "/archive", "/users"}
 
 type navigationUser struct {
 	userID          string
@@ -28,7 +28,7 @@ type navigationUser struct {
 
 func navigationUsers() []navigationUser {
 	return []navigationUser{
-		{userID: users.AdminUsername, username: "admin", wantLinks: []string{"/requests", "/bandwidth", "/alerts", "/archive"}, wantPermissions: strings.Join(users.AllPermissions, " ")},
+		{userID: users.AdminUsername, username: "admin", wantLinks: []string{"/requests", "/bandwidth", "/alerts", "/archive", "/users"}, wantPermissions: strings.Join(users.AllPermissions, " ")},
 		{userID: "user-requests", username: "reader", permissions: []string{users.ViewRequests}, wantLinks: []string{"/requests"}, wantPermissions: users.ViewRequests},
 		{userID: "user-bandwidth", username: "bandwidth-only", permissions: []string{users.ViewBandwidth}, wantLinks: []string{"/bandwidth"}, wantPermissions: users.ViewBandwidth},
 		{userID: "user-alerts", username: "alert-viewer", permissions: []string{users.ViewAlerts}, wantLinks: []string{"/alerts"}, wantPermissions: users.ViewAlerts},

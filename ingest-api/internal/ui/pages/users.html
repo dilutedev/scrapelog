@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Users · scrapelog</title>
+<link rel="stylesheet" href="/assets/{{.AssetVersion}}/app.css">
+<script type="module" src="/assets/{{.AssetVersion}}/users.js"></script>
+</head>
+<body>
+{{template "topbar" .}}
+<main class="users">
+<div class="alerts-header">
+<h1>Users</h1>
+<button type="button" id="add-user">Add user</button>
+</div>
+<p id="users-error" class="query-error" role="alert" hidden></p>
+<form id="user-form" class="rule-form" novalidate hidden>
+<h2 id="user-form-title">Add user</h2>
+<label for="user-username">Username or email</label>
+<input id="user-username" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="128" required>
+<label for="user-password" id="user-password-label">Password</label>
+<input id="user-password" type="password" autocomplete="new-password" minlength="12">
+<p id="user-password-note" class="note">At least 12 characters. You set it and share it with the user yourself.</p>
+<fieldset class="permission-list">
+<legend>Permissions</legend>
+<label><input type="checkbox" name="permission" value="view_requests"> View requests</label>
+<label><input type="checkbox" name="permission" value="view_bandwidth"> View bandwidth</label>
+<label><input type="checkbox" name="permission" value="view_alerts"> View alerts</label>
+<label><input type="checkbox" name="permission" value="manage_alerts"> Create and change alerts (includes viewing)</label>
+<label><input type="checkbox" name="permission" value="view_archives"> View and download archives</label>
+<label><input type="checkbox" name="permission" value="estimate_restores"> Estimate restores</label>
+<label><input type="checkbox" name="permission" value="manage_restores"> Start and delete restores (includes the estimate)</label>
+<button type="button" id="select-all-permissions">Select all</button>
+</fieldset>
+<label id="user-disabled-row" hidden><input type="checkbox" id="user-disabled"> Disabled (cannot sign in)</label>
+<p id="user-status" role="status"></p>
+<div class="editor-actions">
+<button type="submit" id="save-user">Create user</button>
+<button type="button" id="cancel-user">Cancel</button>
+</div>
+</form>
+<ul id="user-list" class="rule-list"></ul>
+<p id="users-empty" class="empty-state" hidden>No users yet. Add one to give someone access with only the permissions you choose.</p>
+</main>
+</body>
+</html>

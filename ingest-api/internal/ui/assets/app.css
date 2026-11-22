@@ -1244,7 +1244,8 @@ body {
 
 .alerts,
 .alert-edit,
-.archive {
+.archive,
+.users {
   margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
@@ -1252,7 +1253,7 @@ body {
   max-width: 60rem;
 }
 
-:is(.alerts, .alert-edit, .archive) h1 {
+:is(.alerts, .alert-edit, .archive, .users) h1 {
   margin: var(--space-2) 0 var(--space-4);
   font-size: var(--size-title);
 }
@@ -1387,8 +1388,27 @@ body {
   box-shadow: var(--shadow-1);
 }
 
-#restore-form {
+#restore-form,
+#user-form {
   max-width: 32rem;
+}
+
+.users h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--size-large);
+}
+
+.users .rule-form {
+  margin-bottom: var(--space-5);
+}
+
+#user-disabled-row[hidden] {
+  display: none;
+}
+
+.rule-form fieldset.permission-list {
+  flex-direction: row;
+  flex-wrap: wrap;
 }
 
 .rule-form > label,
@@ -1423,7 +1443,8 @@ body {
   flex-basis: 100%;
 }
 
-.rule-form label:has(> input[type="radio"]) {
+.rule-form label:has(> input[type="radio"]),
+.rule-form .permission-list label {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -1435,7 +1456,8 @@ body {
   cursor: pointer;
 }
 
-.rule-form label:has(> input[type="radio"]:checked) {
+.rule-form label:has(> input[type="radio"]:checked),
+.rule-form .permission-list label:has(> input[type="checkbox"]:checked) {
   background: var(--focus-soft);
   border-color: var(--focus);
   font-weight: 600;
@@ -1531,7 +1553,8 @@ body {
 @media (max-width: 759px) {
   .alerts,
   .alert-edit,
-  .archive {
+  .archive,
+  .users {
     padding: var(--space-4);
   }
 

@@ -70,6 +70,7 @@ func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse
 	router.HandleFunc("GET /alerts/{rule_id}", withSecurityHeaders(requirePagePermission(sessionSigner, userDirectory, []string{users.ManageAlerts}, ui.PageHandler(logger, "alert-edit"))))
 	router.HandleFunc("GET /archive", withSecurityHeaders(requirePagePermission(sessionSigner, userDirectory, []string{users.ViewArchives, users.EstimateRestores, users.ManageRestores}, ui.PageHandler(logger, "archive"))))
 	router.HandleFunc("GET /requests", withSecurityHeaders(requirePagePermission(sessionSigner, userDirectory, []string{users.ViewRequests}, ui.PageHandler(logger, "requests"))))
+	router.HandleFunc("GET /users", withSecurityHeaders(requirePagePermission(sessionSigner, userDirectory, []string{}, ui.PageHandler(logger, "users"))))
 	router.HandleFunc("GET /assets/", withSecurityHeaders(ui.AssetHandler()))
 	return router
 }

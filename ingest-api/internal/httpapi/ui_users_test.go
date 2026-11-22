@@ -217,6 +217,7 @@ func TestUserRoutesRefuseNonAdminAndBadRequests(t *testing.T) {
 		{http.MethodGet, "/ui/api/users"},
 		{http.MethodPost, "/ui/api/users"},
 		{http.MethodPut, "/ui/api/users/" + created.UserID},
+		{http.MethodGet, "/users"},
 	} {
 		request := httptest.NewRequest(target.method, target.path, strings.NewReader(`{}`))
 		request.Header.Set("Content-Type", "application/json")

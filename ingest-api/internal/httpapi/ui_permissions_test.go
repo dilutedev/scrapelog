@@ -48,6 +48,7 @@ var permissionMatrix = []permissionRoute{
 	{pattern: "GET /ui/api/users"},
 	{pattern: "POST /ui/api/users"},
 	{pattern: "PUT /ui/api/users/{user_id}"},
+	{pattern: "GET /users", page: true},
 	{pattern: "GET /requests", page: true, anyOf: []string{users.ViewRequests}},
 	{pattern: "GET /bandwidth", page: true, anyOf: []string{users.ViewBandwidth}},
 	{pattern: "GET /alerts", page: true, anyOf: []string{users.ViewAlerts, users.ManageAlerts}},

@@ -271,6 +271,20 @@ Bytes (`response_size`) and responses over time from `requests_hourly`, so histo
 - Sent and failed deliveries are listed under the rule and kept 30 days (`alert_events`).
 - Secrets at rest: webhook URLs and bot tokens are stored in plain text in `scrapelog.alert_rules` and so are in every backup. The API never returns them and they are never logged. Keep the backup bucket private.
 
+### Users
+
+- Only the admin sees the Users page (`/users`) and can use `GET`, `POST` and `PUT` on `/ui/api/users`; every other signed-in account gets a 403.
+- Add a user with a username (or an email address, lowercased on save) and a password of at least 12 characters that you set and share yourself. `admin` is reserved for the `ADMIN_TOKEN` sign-in.
+- Edit a user to change permissions, set a new password (leave it blank to keep the current one) or disable the account. There is no delete: a disabled user cannot sign in, and the account and its name stay.
+- Permissions:
+  - `view_requests`: the Requests page, request bodies and exports.
+  - `view_bandwidth`: the Bandwidth page.
+  - `view_alerts`: see alert rules and fired alerts.
+  - `manage_alerts`: create, change, test and delete alert rules (includes viewing).
+  - `view_archives`: list and download archives.
+  - `estimate_restores`: estimate an archive restore.
+  - `manage_restores`: start and delete restores (includes the estimate).
+
 ### Archive page
 
 Archived days and restores are on the Archive page; see [Archive](#archive).
