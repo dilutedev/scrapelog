@@ -181,3 +181,68 @@ func TestRootWithoutSessionOrUsersDirectory(t *testing.T) {
 		t.Fatalf("status %d, want 503", unavailable.Code)
 	}
 }
+
+func TestArchivePageShowsOnlyPermittedBlocks(t *testing.T) {
+	tests := map[string]struct {
+		permissions []string
+		wantPresent []string
+	}{
+		"admin":                      {wantPresent: []string{"archive-list", "restore-form", "start-restore", "restore-list"}},
+		"estimate only":              {permissions: []string{users.EstimateRestores}, wantPresent: []string{"restore-form"}},
+		"manage restores":            {permissions: []string{users.ManageRestores}, wantPresent: []string{"restore-form", "start-restore", "restore-list"}},
+		"view archives":              {permissions: []string{users.ViewArchives}, wantPresent: []string{"archive-list", "restore-list"}},
+		"view archives and estimate": {permissions: []string{users.ViewArchives, users.EstimateRestores}, wantPresent: []string{"archive-list", "restore-form", "restore-list"}},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			directory := &fakeUserDirectory{records: map[string]users.Record{
+				"user-a": {UserID: "user-a", Username: "a", Permissions: test.permissions, SessionVersion: 1},
+			}}
+			cookieValue := userSession("user-a", 1)
+			if name == "admin" {
+				cookieValue = userSession(users.AdminUsername, 0)
+			}
+			recorder := serve(newPermissionHandler(directory), cookieRequest(http.MethodGet, "/archive", cookieValue))
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status %d, want 200", recorder.Code)
+			}
+			for _, elementID := range []string{"archive-list", "restore-form", "start-restore", "restore-list"} {
+				present := strings.Contains(recorder.Body.String(), `id="`+elementID+`"`)
+				if present != slices.Contains(test.wantPresent, elementID) {
+					t.Errorf("%s present %v, want %v", elementID, present, !present)
+				}
+			}
+		})
+	}
+}
+
+func TestAlertsPageOffersNewRuleOnlyToManagers(t *testing.T) {
+	directory := &fakeUserDirectory{records: map[string]users.Record{
+		"viewer":  {UserID: "viewer", Username: "viewer", Permissions: []string{users.ViewAlerts}, SessionVersion: 1},
+		"manager": {UserID: "manager", Username: "manager", Permissions: []string{users.ManageAlerts}, SessionVersion: 1},
+	}}
+	handler := newPermissionHandler(directory)
+	tests := map[string]struct {
+		cookieValue string
+		wantLink    bool
+	}{
+		"admin":   {cookieValue: userSession(users.AdminUsername, 0), wantLink: true},
+		"manager": {cookieValue: userSession("manager", 1), wantLink: true},
+		"viewer":  {cookieValue: userSession("viewer", 1), wantLink: false},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			recorder := serve(handler, cookieRequest(http.MethodGet, "/alerts", test.cookieValue))
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status %d, want 200", recorder.Code)
+			}
+			if hasLink := strings.Contains(recorder.Body.String(), `href="/alerts/new"`); hasLink != test.wantLink {
+				t.Fatalf("new rule link present %v, want %v", hasLink, test.wantLink)
+			}
+		})
+	}
+	editor := serve(handler, cookieRequest(http.MethodGet, "/alerts/x", userSession("viewer", 1)))
+	if editor.Code != http.StatusForbidden || !strings.Contains(editor.Body.String(), "You don't have access to this page") {
+		t.Fatalf("editor status %d for view-only user, want styled 403", editor.Code)
+	}
+}

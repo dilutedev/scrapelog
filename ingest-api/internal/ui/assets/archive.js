@@ -1,4 +1,4 @@
-import { apiFetch, formatBytes } from "./shell.js";
+import { apiFetch, can, formatBytes } from "./shell.js";
 
 const pollIntervalMilliseconds = 3000;
 
@@ -21,6 +21,12 @@ const restoreList = document.getElementById("restore-list");
 const restoresEmpty = document.getElementById("restores-empty");
 
 let pollTimer;
+
+function setStartEnabled(enabled) {
+  if (startButton) {
+    startButton.disabled = !enabled;
+  }
+}
 
 function showError(element, message) {
   element.textContent = message;
@@ -95,19 +101,21 @@ function renderRestore(restore) {
   const text = document.createElement("span");
   text.textContent = `${restoreLabel(restore)} · ${restoreStatusText(restore)}`;
   const actions = document.createElement("span");
-  if (restore.status === "ready") {
+  if (restore.status === "ready" && can("view_requests")) {
     const browse = document.createElement("a");
     browse.className = "action-button";
     browse.href = "/requests?" + new URLSearchParams({ restore_id: restore.restore_id, from: restore.from, to: restore.to });
     browse.textContent = "Browse";
     actions.append(browse, " ");
   }
-  const deleteButton = document.createElement("button");
-  deleteButton.type = "button";
-  deleteButton.className = "action-button";
-  deleteButton.textContent = "Delete";
-  deleteButton.addEventListener("click", () => deleteRestore(restore));
-  actions.append(deleteButton);
+  if (can("manage_restores")) {
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "action-button";
+    deleteButton.textContent = "Delete";
+    deleteButton.addEventListener("click", () => deleteRestore(restore));
+    actions.append(deleteButton);
+  }
   item.append(text, actions);
   return item;
 }
@@ -141,42 +149,53 @@ function estimateText(estimate) {
   return text;
 }
 
-restoreForm.addEventListener("input", () => {
-  startButton.disabled = true;
-  estimateElement.hidden = true;
-  restoreErrorElement.hidden = true;
-});
-
-restoreForm.addEventListener("submit", async (submitEvent) => {
-  submitEvent.preventDefault();
-  startButton.disabled = true;
-  restoreErrorElement.hidden = true;
-  let estimate;
-  try {
-    estimate = await apiFetch("/ui/api/restores/estimate?" + new URLSearchParams(restoreRange()));
-  } catch (error) {
-    showError(restoreErrorElement, error.message);
-    return;
-  }
-  estimateElement.textContent = estimateText(estimate);
-  estimateElement.hidden = false;
-  startButton.disabled = !estimate.allowed;
-});
-
-startButton.addEventListener("click", async () => {
-  startButton.disabled = true;
-  restoreErrorElement.hidden = true;
-  try {
-    await apiFetch("/ui/api/restores", { method: "POST", body: restoreRange() });
+if (restoreForm) {
+  restoreForm.addEventListener("input", () => {
+    setStartEnabled(false);
     estimateElement.hidden = true;
-  } catch (error) {
-    showError(restoreErrorElement, error.message);
+    restoreErrorElement.hidden = true;
+  });
+
+  restoreForm.addEventListener("submit", async (submitEvent) => {
+    submitEvent.preventDefault();
+    setStartEnabled(false);
+    restoreErrorElement.hidden = true;
+    let estimate;
+    try {
+      estimate = await apiFetch("/ui/api/restores/estimate?" + new URLSearchParams(restoreRange()));
+    } catch (error) {
+      showError(restoreErrorElement, error.message);
+      return;
+    }
+    estimateElement.textContent = estimateText(estimate);
+    estimateElement.hidden = false;
+    setStartEnabled(estimate.allowed);
+  });
+
+  if (startButton) {
+    startButton.addEventListener("click", async () => {
+      setStartEnabled(false);
+      restoreErrorElement.hidden = true;
+      try {
+        await apiFetch("/ui/api/restores", { method: "POST", body: restoreRange() });
+        estimateElement.hidden = true;
+      } catch (error) {
+        showError(restoreErrorElement, error.message);
+      }
+      loadRestores();
+    });
   }
-  loadRestores();
-});
+}
 
 async function load() {
   let archives;
+  if (!archiveList) {
+    sectionsElement.hidden = false;
+    if (restoreList) {
+      loadRestores();
+    }
+    return;
+  }
   pageElement.setAttribute("aria-busy", "true");
   try {
     archives = await apiFetch("/ui/api/archives");
