@@ -632,6 +632,10 @@ body {
   margin: var(--space-4) 0;
 }
 
+#load-older[hidden] {
+  display: none;
+}
+
 .detail-pane {
   position: sticky;
   top: var(--header-height);

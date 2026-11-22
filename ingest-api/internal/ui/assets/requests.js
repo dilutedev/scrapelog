@@ -154,6 +154,7 @@ function showQueryError(message) {
 function updateResultsControls() {
   resultsEmpty.hidden = rows.length > 0;
   loadOlderButton.hidden = nextCursor === null;
+  loadOlderButton.disabled = nextCursor === null;
 }
 
 function createFilterCell(fieldName, value, content) {
@@ -273,6 +274,7 @@ async function runSearch({ push }) {
   const thisSearch = searchSequence;
   resultsSection.setAttribute("aria-busy", "true");
   tapeSection.setAttribute("aria-busy", "true");
+  loadOlderButton.disabled = true;
   resetDetailSelection();
 
   const parameters = { q: queryText, ...rangeParameters(), ...sourceParameters() };
@@ -292,6 +294,7 @@ async function runSearch({ push }) {
     nextCursor = null;
     resultsEmpty.hidden = true;
     loadOlderButton.hidden = true;
+    loadOlderButton.disabled = true;
   } else {
     for (const summary of searchOutcome.value.rows) {
       appendRow(summary);
@@ -341,7 +344,9 @@ async function loadOlder() {
       showQueryError(error.message);
     }
   } finally {
-    loadOlderButton.disabled = false;
+    if (thisSearch === searchSequence) {
+      loadOlderButton.disabled = nextCursor === null;
+    }
   }
 }
 
