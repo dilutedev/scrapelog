@@ -289,6 +289,14 @@ Bytes (`response_size`) and responses over time from `requests_hourly`, so histo
 
 Archived days and restores are on the Archive page; see [Archive](#archive).
 
+### App icon
+
+The UI is installable as a web app (Add to Home Screen, or Install in Chrome) from an HTTPS address. The icon is `ingest-api/internal/ui/assets/icon.svg`. The PNG sizes next to it are derived from it and committed, so there is no build step. To regenerate them after changing the SVG, run this from `ingest-api/internal/ui/assets`:
+
+```
+for size in 180 192 512; do magick -background none -density 288 icon.svg -resize ${size}x${size} -strip icon-${size}.png; done
+```
+
 ### Disk use
 
 The UI does not chart disk use. Use `GET /v1/admin/storage`.

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"encoding/json"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -204,5 +205,126 @@ func TestUsersPageRendersFormAndEveryPermission(t *testing.T) {
 	}
 	if got := strings.Count(output, `name="permission"`); got != len(users.AllPermissions) {
 		t.Errorf("checkbox count = %d, want %d", got, len(users.AllPermissions))
+	}
+}
+
+func TestManifestIsServedWithRequiredFields(t *testing.T) {
+	recorder := serveAsset("/assets/" + assetVersion + "/manifest.json")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", recorder.Code)
+	}
+	if contentType := recorder.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "application/json") {
+		t.Fatalf("content type %q, want application/json", contentType)
+	}
+	var manifest struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		ShortName string `json:"short_name"`
+		StartURL  string `json:"start_url"`
+		Scope     string `json:"scope"`
+		Display   string `json:"display"`
+		Icons     []struct {
+			Source  string `json:"src"`
+			Sizes   string `json:"sizes"`
+			Type    string `json:"type"`
+			Purpose string `json:"purpose"`
+		} `json:"icons"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &manifest); err != nil {
+		t.Fatalf("manifest is not valid JSON: %v", err)
+	}
+	if manifest.Name == "" || manifest.ShortName == "" {
+		t.Fatalf("name %q and short_name %q must both be set", manifest.Name, manifest.ShortName)
+	}
+	if manifest.ID != "/" || manifest.StartURL != "/" || manifest.Scope != "/" {
+		t.Fatalf("id %q, start_url %q, scope %q, want all /", manifest.ID, manifest.StartURL, manifest.Scope)
+	}
+	if manifest.Display != "standalone" {
+		t.Fatalf("display %q, want standalone", manifest.Display)
+	}
+	foundSizes := map[string]bool{}
+	foundMaskable := false
+	for _, icon := range manifest.Icons {
+		if icon.Type != "image/png" {
+			t.Fatalf("icon %q type %q, want image/png", icon.Source, icon.Type)
+		}
+		foundSizes[icon.Sizes] = true
+		if icon.Purpose == "maskable" {
+			foundMaskable = true
+		}
+		iconRecorder := serveAsset("/assets/" + assetVersion + "/" + icon.Source)
+		if iconRecorder.Code != http.StatusOK {
+			t.Fatalf("icon %q status %d, want 200", icon.Source, iconRecorder.Code)
+		}
+		if contentType := iconRecorder.Header().Get("Content-Type"); contentType != "image/png" {
+			t.Fatalf("icon %q content type %q, want image/png", icon.Source, contentType)
+		}
+	}
+	if !foundSizes["192x192"] || !foundSizes["512x512"] {
+		t.Fatalf("icon sizes %v must include 192x192 and 512x512", foundSizes)
+	}
+	if !foundMaskable {
+		t.Fatal("no icon has purpose maskable")
+	}
+}
+
+func TestIconSVGIsServedAsSVG(t *testing.T) {
+	recorder := serveAsset("/assets/" + assetVersion + "/icon.svg")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", recorder.Code)
+	}
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "image/svg+xml" {
+		t.Fatalf("content type %q, want image/svg+xml", contentType)
+	}
+}
+
+func TestEveryPageIncludesHeadPartial(t *testing.T) {
+	entries, err := fs.ReadDir(embeddedFiles, "pages")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	pageNames := []string{}
+	for _, entry := range entries {
+		if entry.Name() == "topbar.html" || entry.Name() == "head.html" {
+			continue
+		}
+		pageNames = append(pageNames, entry.Name())
+	}
+	if len(pageNames) != 8 {
+		t.Fatalf("found %d pages %v, want 8", len(pageNames), pageNames)
+	}
+	wantFragments := []string{
+		`href="/assets/v/manifest.json" crossorigin="use-credentials"`,
+		`href="/assets/v/icon.svg"`,
+		`rel="apple-touch-icon"`,
+		`name="theme-color"`,
+	}
+	for _, pageName := range pageNames {
+		t.Run(pageName, func(t *testing.T) {
+			var rendered bytes.Buffer
+			if err := pageTemplates.ExecuteTemplate(&rendered, pageName, pageData{AssetVersion: "v", Viewer: Viewer{IsAdmin: true}}); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			for _, fragment := range wantFragments {
+				if !strings.Contains(rendered.String(), fragment) {
+					t.Fatalf("output missing %q", fragment)
+				}
+			}
+		})
+	}
+}
+
+func TestBrandMarkAppearsInTopbarAndLogin(t *testing.T) {
+	for _, templateName := range []string{"topbar", "login.html"} {
+		t.Run(templateName, func(t *testing.T) {
+			var rendered bytes.Buffer
+			if err := pageTemplates.ExecuteTemplate(&rendered, templateName, pageData{AssetVersion: "v", Viewer: Viewer{IsAdmin: true}}); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			output := rendered.String()
+			if !strings.Contains(output, `class="brand-mark" src="/assets/v/icon.svg"`) {
+				t.Fatalf("output missing brand mark:\n%s", output)
+			}
+		})
 	}
 }

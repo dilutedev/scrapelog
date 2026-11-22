@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in · scrapelog</title>
-<link rel="stylesheet" href="/assets/{{.AssetVersion}}/app.css">
+{{template "head" .}}
 <script type="module" src="/assets/{{.AssetVersion}}/login.js"></script>
 </head>
 <body>
 <main class="login">
-<h1>scrapelog</h1>
+<h1><img class="brand-mark" src="/assets/{{.AssetVersion}}/icon.svg" alt="" width="32" height="32">scrapelog</h1>
 <form id="login-form" method="post">
 <label for="login-username">Username</label>
 <input id="login-username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>

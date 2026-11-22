@@ -1,5 +1,5 @@
 {{define "topbar"}}<header class="topbar" data-permissions="{{.PermissionList}}">
-<span class="brand">scrapelog</span>
+<span class="brand"><img class="brand-mark" src="/assets/{{.AssetVersion}}/icon.svg" alt="" width="24" height="24">scrapelog</span>
 <nav aria-label="Sections">
 {{range .NavigationLinks}}<a href="{{.Path}}" aria-current="{{if .Current}}page{{else}}false{{end}}">{{.Label}}</a>{{end}}
 </nav>
