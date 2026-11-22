@@ -298,6 +298,7 @@ func TestEveryPageIncludesHeadPartial(t *testing.T) {
 		`href="/assets/v/icon.svg"`,
 		`rel="apple-touch-icon"`,
 		`name="theme-color"`,
+		`src="/assets/v/theme-init.js"`,
 	}
 	for _, pageName := range pageNames {
 		t.Run(pageName, func(t *testing.T) {
@@ -309,6 +310,9 @@ func TestEveryPageIncludesHeadPartial(t *testing.T) {
 				if !strings.Contains(rendered.String(), fragment) {
 					t.Fatalf("output missing %q", fragment)
 				}
+			}
+			if strings.Index(rendered.String(), "theme-init.js") > strings.Index(rendered.String(), "app.css") {
+				t.Fatal("theme-init.js must come before app.css so the theme is set before first paint")
 			}
 		})
 	}
@@ -326,5 +330,54 @@ func TestBrandMarkAppearsInTopbarAndLogin(t *testing.T) {
 				t.Fatalf("output missing brand mark:\n%s", output)
 			}
 		})
+	}
+}
+
+func TestTopbarHasThemeToggle(t *testing.T) {
+	var topbar bytes.Buffer
+	if err := pageTemplates.ExecuteTemplate(&topbar, "topbar", pageData{AssetVersion: "v"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, fragment := range []string{`id="theme-toggle"`, `aria-pressed="false"`} {
+		if !strings.Contains(topbar.String(), fragment) {
+			t.Fatalf("topbar missing %q", fragment)
+		}
+	}
+	var login bytes.Buffer
+	if err := pageTemplates.ExecuteTemplate(&login, "login.html", pageData{AssetVersion: "v"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(login.String(), `id="theme-toggle"`) {
+		t.Fatal("login page must not have a theme toggle")
+	}
+}
+
+func TestAppCSSHasNoColourLiteralsOutsideThemeBlocks(t *testing.T) {
+	stylesheet, err := fs.ReadFile(embeddedFiles, "assets/app.css")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	withoutThemeBlocks := regexp.MustCompile(`:root[^{]*\{[^}]*\}`).ReplaceAllString(string(stylesheet), "")
+	if literal := regexp.MustCompile(`#[0-9a-fA-F]{3,8}\b|rgba?\(`).FindString(withoutThemeBlocks); literal != "" {
+		t.Fatalf("colour literal %q outside the :root theme blocks", literal)
+	}
+	darkBlock := regexp.MustCompile(`:root\[data-theme="dark"\]\s*\{[^}]*\}`).FindString(string(stylesheet))
+	if darkBlock == "" {
+		t.Fatal("dark theme block not found")
+	}
+	for _, variable := range []string{"--chart-1:", "--chart-2:", "--chart-3:", "--chart-4:", "--chart-5:", "--chart-6:", "--chart-7:", "--chart-8:", "--chart-other:"} {
+		if !strings.Contains(darkBlock, variable) {
+			t.Fatalf("dark theme block missing %s", variable)
+		}
+	}
+}
+
+func TestBandwidthScriptHasNoColourLiterals(t *testing.T) {
+	script, err := fs.ReadFile(embeddedFiles, "assets/bandwidth.js")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if literal := regexp.MustCompile(`#[0-9a-fA-F]{6}\b`).FindString(string(script)); literal != "" {
+		t.Fatalf("colour literal %q in bandwidth.js", literal)
 	}
 }

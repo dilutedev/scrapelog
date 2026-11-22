@@ -17,6 +17,7 @@
 }
 
 :root {
+  color-scheme: light;
   --paper: #EEF0EC;
   --sheet: #FBFCFA;
   --sunken: #E5E9E3;
@@ -33,6 +34,19 @@
   --status-0: #7A4E9C;
   --shadow-1: 0 1px 2px rgb(29 42 51 / 0.06), 0 1px 3px rgb(29 42 51 / 0.05);
   --shadow-2: 0 8px 24px rgb(29 42 51 / 0.14), 0 2px 6px rgb(29 42 51 / 0.08);
+  --ink-hover: #2C3B46;
+  --sheet-translucent: rgb(251 252 250 / 0.85);
+  --chart-1: #4C6A85;
+  --chart-2: #8A6F4D;
+  --chart-3: #5E8C87;
+  --chart-4: #9A5E7A;
+  --chart-5: #6B7A3A;
+  --chart-6: #B07C6A;
+  --chart-7: #5D5A8C;
+  --chart-8: #7F8C99;
+  --chart-other: #868D87;
+  --chart-axis: var(--graphite);
+  --chart-grid: var(--rule-soft);
   --font-sans: "Atkinson Hyperlegible Next", system-ui, sans-serif;
   --font-mono: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
   --size-small: 12.5px;
@@ -52,6 +66,37 @@
   --radius-pill: 999px;
   --header-height: 56px;
   --control-height: 2.5rem;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #21222C;
+  --sheet: #282A36;
+  --sunken: #343746;
+  --ink: #F8F8F2;
+  --graphite: #A4AFD6;
+  --rule: #44475A;
+  --rule-soft: #383A4B;
+  --focus: #BD93F9;
+  --focus-soft: rgb(189 147 249 / 0.22);
+  --status-2xx: #50FA7B;
+  --status-3xx: #8BE9FD;
+  --status-4xx: #FFB86C;
+  --status-5xx: #FF7878;
+  --status-0: #BD93F9;
+  --ink-hover: #DADAD2;
+  --sheet-translucent: rgb(40 42 54 / 0.85);
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.3), 0 1px 3px rgb(0 0 0 / 0.25);
+  --shadow-2: 0 8px 24px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.35);
+  --chart-1: #BD93F9;
+  --chart-2: #8BE9FD;
+  --chart-3: #50FA7B;
+  --chart-4: #FFB86C;
+  --chart-5: #FF79C6;
+  --chart-6: #F1FA8C;
+  --chart-7: #FF7878;
+  --chart-8: #9AA5CE;
+  --chart-other: #7881A8;
 }
 
 @media (max-width: 759px), (pointer: coarse) {
@@ -126,7 +171,7 @@ body {
 }
 
 :where(button[type="submit"]):hover {
-  background: #2C3B46;
+  background: var(--ink-hover);
 }
 
 :where(button:disabled) {
@@ -158,7 +203,7 @@ body {
 
 @supports (backdrop-filter: blur(8px)) {
   .topbar {
-    background: rgb(251 252 250 / 0.85);
+    background: var(--sheet-translucent);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
   }
@@ -236,6 +281,20 @@ body {
 }
 
 .topbar #sign-out:hover {
+  background: var(--sunken);
+}
+
+.topbar #theme-toggle {
+  flex-shrink: 0;
+  width: var(--control-height);
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.topbar #theme-toggle:hover,
+.topbar #theme-toggle[aria-pressed="true"] {
   background: var(--sunken);
 }
 

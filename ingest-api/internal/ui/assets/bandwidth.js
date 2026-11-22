@@ -3,13 +3,10 @@ import uPlot from "./vendor/uplot/uPlot.esm.js";
 
 const presetSeconds = { "24h": 86400, "7d": 604800, "30d": 2592000, "90d": 7776000 };
 const presetLabels = { "24h": "24 hours", "7d": "7 days", "30d": "30 days", "90d": "90 days" };
-const seriesColors = ["#4C6A85", "#8A6F4D", "#5E8C87", "#9A5E7A", "#6B7A3A", "#B07C6A", "#5D5A8C", "#7F8C99"];
-const otherSeriesColor = "#868D87";
+const namedSeriesCount = 8;
 const splitLabels = { proxy: "Proxy", project: "Project", scraper: "Scraper", domain: "Domain" };
 const stepValues = ["hour", "day"];
 const defaultState = { split: "proxy", project: "", range: "7d", step: "hour" };
-const axisStroke = "#5B6770";
-const gridStroke = "#DCE1DB";
 const desktopChartHeight = 320;
 const mobileChartHeight = 220;
 const desktopYAxisSize = 80;
@@ -66,8 +63,12 @@ function displayKey(key) {
   return key === "" ? "(none)" : key;
 }
 
+function readThemeColor(variableName) {
+  return getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
+}
+
 function colorForGroup(groupIndex) {
-  return groupIndex >= seriesColors.length ? otherSeriesColor : seriesColors[groupIndex];
+  return readThemeColor(groupIndex >= namedSeriesCount ? "--chart-other" : `--chart-${groupIndex + 1}`);
 }
 
 function destroyChart() {
@@ -117,6 +118,8 @@ function renderChart() {
       };
     }),
   );
+  const axisStroke = readThemeColor("--chart-axis");
+  const gridStroke = readThemeColor("--chart-grid");
   chart = new uPlot(
     {
       width: chartContainer.clientWidth,
@@ -284,6 +287,12 @@ new ResizeObserver(() => {
 window.addEventListener("popstate", () => {
   readUrlState();
   load();
+});
+
+document.addEventListener("themechange", () => {
+  if (loadedResponse) {
+    renderAll();
+  }
 });
 
 readUrlState();
