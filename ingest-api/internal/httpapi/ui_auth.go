@@ -2,11 +2,13 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"mime"
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ratelimit"
@@ -15,13 +17,39 @@ import (
 )
 
 const (
-	contentSecurityPolicy = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
-	wrongTokenMessage     = "That token doesn't match ADMIN_TOKEN on the server."
-	maxLoginBodyBytes     = 4096
+	contentSecurityPolicy   = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+	wrongCredentialsMessage = "wrong username or password"
+	usersUnavailableMessage = "user accounts unavailable: apply clickhouse/initdb/005_users.sql and the scrapelog.users grant, then restart ingest-api"
+	maxLoginBodyBytes       = 4096
 )
 
+var errNoSession = errors.New("no valid session")
+
+type UserDirectory interface {
+	VerifyLogin(username string, password string) (users.Record, error)
+	Lookup(userID string) (users.Record, error)
+}
+
 type loginRequest struct {
-	Token string `json:"token"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type principal struct {
+	isAdmin     bool
+	permissions []string
+}
+
+func (sessionPrincipal principal) allows(anyOf []string) bool {
+	if sessionPrincipal.isAdmin {
+		return true
+	}
+	for _, permission := range anyOf {
+		if slices.Contains(sessionPrincipal.permissions, permission) {
+			return true
+		}
+	}
+	return false
 }
 
 func withSecurityHeaders(next http.HandlerFunc) http.HandlerFunc {
@@ -52,36 +80,75 @@ func requireSameOriginJSON(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func hasValidSession(signer *session.Signer, request *http.Request) bool {
+func resolvePrincipal(signer *session.Signer, userDirectory UserDirectory, request *http.Request) (principal, error) {
 	cookie, err := request.Cookie(session.CookieName)
 	if err != nil {
-		return false
+		return principal{}, errNoSession
 	}
-	_, valid := signer.Verify(cookie.Value)
-	return valid
+	claims, valid := signer.Verify(cookie.Value)
+	if !valid {
+		return principal{}, errNoSession
+	}
+	if claims.Subject == users.AdminUsername {
+		return principal{isAdmin: true}, nil
+	}
+	record, err := userDirectory.Lookup(claims.Subject)
+	if errors.Is(err, users.ErrUnavailable) {
+		return principal{}, err
+	}
+	if err != nil || record.Disabled || record.SessionVersion != claims.SessionVersion {
+		return principal{}, errNoSession
+	}
+	return principal{permissions: record.Permissions}, nil
 }
 
-func requireSession(signer *session.Signer, next http.HandlerFunc) http.HandlerFunc {
+func requireSession(signer *session.Signer, userDirectory UserDirectory, next http.HandlerFunc) http.HandlerFunc {
+	return requirePermissionOrAnyPrincipal(signer, userDirectory, nil, true, next)
+}
+
+func requirePermission(signer *session.Signer, userDirectory UserDirectory, anyOf []string, next http.HandlerFunc) http.HandlerFunc {
+	return requirePermissionOrAnyPrincipal(signer, userDirectory, anyOf, false, next)
+}
+
+func requirePermissionOrAnyPrincipal(signer *session.Signer, userDirectory UserDirectory, anyOf []string, anyPrincipal bool, next http.HandlerFunc) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, request *http.Request) {
-		if !hasValidSession(signer, request) {
+		sessionPrincipal, err := resolvePrincipal(signer, userDirectory, request)
+		if errors.Is(err, users.ErrUnavailable) {
+			writeError(responseWriter, http.StatusServiceUnavailable, usersUnavailableMessage)
+			return
+		}
+		if err != nil {
 			writeError(responseWriter, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		next(responseWriter, request)
-	}
-}
-
-func requireSessionPage(signer *session.Signer, next http.HandlerFunc) http.HandlerFunc {
-	return func(responseWriter http.ResponseWriter, request *http.Request) {
-		if !hasValidSession(signer, request) {
-			http.Redirect(responseWriter, request, "/login?next="+url.QueryEscape(request.URL.RequestURI()), http.StatusFound)
+		if !anyPrincipal && !sessionPrincipal.allows(anyOf) {
+			writeError(responseWriter, http.StatusForbidden, "you don't have permission for this")
 			return
 		}
 		next(responseWriter, request)
 	}
 }
 
-func loginHandler(signer *session.Signer, adminTokenHash [32]byte, loginLimiter *ratelimit.Limiter) http.HandlerFunc {
+func requirePagePermission(signer *session.Signer, userDirectory UserDirectory, anyOf []string, next http.HandlerFunc) http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, request *http.Request) {
+		sessionPrincipal, err := resolvePrincipal(signer, userDirectory, request)
+		if errors.Is(err, users.ErrUnavailable) {
+			http.Error(responseWriter, usersUnavailableMessage, http.StatusServiceUnavailable)
+			return
+		}
+		if err != nil {
+			http.Redirect(responseWriter, request, "/login?next="+url.QueryEscape(request.URL.RequestURI()), http.StatusFound)
+			return
+		}
+		if !sessionPrincipal.allows(anyOf) {
+			http.Error(responseWriter, "You don't have permission to open this page.", http.StatusForbidden)
+			return
+		}
+		next(responseWriter, request)
+	}
+}
+
+func loginHandler(signer *session.Signer, adminTokenHash [32]byte, loginLimiter *ratelimit.Limiter, userDirectory UserDirectory) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, request *http.Request) {
 		allowed, retryAfter := loginLimiter.Take(clientIP(request), 1)
 		if !allowed {
@@ -92,15 +159,34 @@ func loginHandler(signer *session.Signer, adminTokenHash [32]byte, loginLimiter 
 		}
 		var body loginRequest
 		limitedBody := http.MaxBytesReader(responseWriter, request.Body, maxLoginBodyBytes)
-		if err := json.NewDecoder(limitedBody).Decode(&body); err != nil || body.Token == "" {
+		username := ""
+		if err := json.NewDecoder(limitedBody).Decode(&body); err == nil {
+			username = users.NormalizeUsername(body.Username)
+		}
+		if username == "" || body.Password == "" {
 			writeError(responseWriter, http.StatusBadRequest, "invalid json body")
 			return
 		}
-		if !adminTokenMatches(adminTokenHash, body.Token) {
-			writeError(responseWriter, http.StatusUnauthorized, wrongTokenMessage)
-			return
+		sessionValue := ""
+		if username == users.AdminUsername {
+			if !adminTokenMatches(adminTokenHash, body.Password) {
+				writeError(responseWriter, http.StatusUnauthorized, wrongCredentialsMessage)
+				return
+			}
+			sessionValue = signer.Issue(users.AdminUsername, 0)
+		} else {
+			record, err := userDirectory.VerifyLogin(username, body.Password)
+			if errors.Is(err, users.ErrUnavailable) {
+				writeError(responseWriter, http.StatusServiceUnavailable, usersUnavailableMessage)
+				return
+			}
+			if err != nil {
+				writeError(responseWriter, http.StatusUnauthorized, wrongCredentialsMessage)
+				return
+			}
+			sessionValue = signer.Issue(record.UserID, record.SessionVersion)
 		}
-		http.SetCookie(responseWriter, sessionCookie(request, signer.Issue(users.AdminUsername, 0), int(session.Lifetime.Seconds())))
+		http.SetCookie(responseWriter, sessionCookie(request, sessionValue, int(session.Lifetime.Seconds())))
 		responseWriter.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -112,8 +198,8 @@ func logoutHandler() http.HandlerFunc {
 	}
 }
 
-func sessionStatusHandler(signer *session.Signer) http.HandlerFunc {
-	return requireSession(signer, func(responseWriter http.ResponseWriter, request *http.Request) {
+func sessionStatusHandler(signer *session.Signer, userDirectory UserDirectory) http.HandlerFunc {
+	return requireSession(signer, userDirectory, func(responseWriter http.ResponseWriter, request *http.Request) {
 		responseWriter.WriteHeader(http.StatusNoContent)
 	})
 }

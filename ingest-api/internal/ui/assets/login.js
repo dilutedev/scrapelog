@@ -18,7 +18,8 @@ function safeNextPath(candidate) {
 
 const destination = safeNextPath(new URLSearchParams(location.search).get("next"));
 const loginForm = document.getElementById("login-form");
-const tokenInput = document.getElementById("admin-token");
+const usernameInput = document.getElementById("login-username");
+const passwordInput = document.getElementById("login-password");
 const errorMessage = document.getElementById("login-error");
 const submitButton = loginForm.querySelector("button[type=submit]");
 
@@ -30,7 +31,7 @@ loginForm.addEventListener("submit", async (submitEvent) => {
     const loginResponse = await fetch("/ui/api/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: tokenInput.value }),
+      body: JSON.stringify({ username: usernameInput.value, password: passwordInput.value }),
     });
     if (loginResponse.status === 204) {
       location.replace(destination);

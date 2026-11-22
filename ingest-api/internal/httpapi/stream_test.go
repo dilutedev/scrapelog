@@ -537,7 +537,7 @@ func TestStreamGuardsRunBeforeReadingBody(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	unauthenticated := httptest.NewRequest(http.MethodPost, "/v1/requests/stream", failingReader{t})
 	unauthenticatedRecorder := httptest.NewRecorder()
-	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, newChunkRecordingWriter(), &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, testIngestConfig).ServeHTTP(unauthenticatedRecorder, unauthenticated)
+	NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, newChunkRecordingWriter(), &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, &fakeAlertStore{}, &fakeRefresher{}, nil, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, &fakeUserDirectory{}, testIngestConfig).ServeHTTP(unauthenticatedRecorder, unauthenticated)
 	if unauthenticatedRecorder.Code != http.StatusUnauthorized {
 		t.Fatalf("status %d, want 401", unauthenticatedRecorder.Code)
 	}

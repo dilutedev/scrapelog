@@ -272,8 +272,8 @@ func buildRecords(count int, extraFields map[string]any) []map[string]any {
 
 func signIn(t *testing.T) string {
 	t.Helper()
-	login := func(token string) *http.Response {
-		payload, _ := json.Marshal(map[string]string{"token": token})
+	login := func(password string) *http.Response {
+		payload, _ := json.Marshal(map[string]string{"username": "admin", "password": password})
 		request, err := http.NewRequest(http.MethodPost, baseURL+"/ui/api/login", bytes.NewReader(payload))
 		if err != nil {
 			t.Fatalf("building login request: %v", err)
@@ -287,7 +287,7 @@ func signIn(t *testing.T) string {
 		return response
 	}
 	if response := login("wrong"); response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("login with a wrong token returned %d, want 401", response.StatusCode)
+		t.Fatalf("login with a wrong password returned %d, want 401", response.StatusCode)
 	}
 	response := login(adminToken)
 	if response.StatusCode != http.StatusNoContent {

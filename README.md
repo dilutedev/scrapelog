@@ -26,7 +26,7 @@ docker compose exec ingest-api /scrapelog keys create --project my-project --nam
 ```
 
 4. Send data with one of the [examples](#examples), using the printed `key` as `SCRAPELOG_KEY`.
-5. Open the UI at `http://127.0.0.1:8080` (or your `INGEST_API_PORT`) and sign in with `ADMIN_TOKEN`. See [Web UI](#web-ui).
+5. Open the UI at `http://127.0.0.1:8080` (or your `INGEST_API_PORT`) and sign in with username `admin` and `ADMIN_TOKEN` as the password. See [Web UI](#web-ui).
 
 Upgrades: v1 has no schema migrations. The ClickHouse init script in `clickhouse/initdb/` runs only when the data volume is empty, so a column added by a newer version (for example the request body columns) exists only in a freshly initialised volume. To pick up a schema change, take a [backup](#backups) if you need the data, then recreate the volume with `docker compose down -v && docker compose up -d --wait`. This deletes all stored requests and API keys. To upgrade an install from before the web UI without losing data, follow [Upgrading an existing install](#upgrading-an-existing-install).
 
@@ -39,7 +39,7 @@ Upgrades: v1 has no schema migrations. The ClickHouse init script in `clickhouse
    - Delete `GRAFANA_ADMIN_PASSWORD`, `GRAFANA_ROOT_URL` and `GRAFANA_PORT`.
    - Optionally set `SCRAPELOG_PUBLIC_URL`.
    - Make sure `S3_ENDPOINT` has no trailing slash.
-4. Recreate ClickHouse so it picks up the new environment, `config.d/archive-s3.xml` and `users.xml` (the `ui_reader` and `archiver` users; `grafana_reader` is removed):
+4. Recreate ClickHouse so it picks up the new environment, `config.d/archive-s3.xml` and `users.xml` (the `ui_reader` and `archiver` users and the `ingest_writer` grant on `scrapelog.users`; `grafana_reader` is removed):
 
 ```
 docker compose up -d --wait --force-recreate clickhouse
@@ -51,7 +51,10 @@ docker compose up -d --wait --force-recreate clickhouse
 docker compose exec -T clickhouse clickhouse-client --multiquery < clickhouse/initdb/002_alerts.sql
 docker compose exec -T clickhouse clickhouse-client --multiquery < clickhouse/initdb/003_archive.sql
 docker compose exec -T clickhouse clickhouse-client --multiquery < clickhouse/initdb/004_restore.sql
+docker compose exec -T clickhouse clickhouse-client --multiquery < clickhouse/initdb/005_users.sql
 ```
+
+   Apply steps 4 and 5 before restarting `ingest-api`. Otherwise sign-in for user accounts returns 503 until you apply them and restart, while ingest and the `admin` sign-in keep working. Everyone signs in again once after this upgrade.
 
    Each fails with "already exists" if that file was applied before; that is harmless.
 
@@ -73,7 +76,7 @@ The Grafana dashboards have no direct replacement panel for disk use, latency pe
 - `ingest-api`: the Go HTTP API. It is published on `127.0.0.1:${INGEST_API_PORT:-8080}`. It also serves the web UI and `/docs`, and runs the alert dispatcher and the hourly archive job.
 - Host ports bind to loopback only. To expose them, put a reverse proxy in front (see [Cloudflare and reverse proxy](#cloudflare-and-reverse-proxy)).
 - ClickHouse users, all with passwords from `.env`:
-  - `ingest_writer` (used by `ingest-api`): can insert into and read `scrapelog.requests`, `scrapelog.api_keys`, `scrapelog.alert_rules` and `scrapelog.alert_events`, and read `system.parts` for the storage measure.
+  - `ingest_writer` (used by `ingest-api`): can insert into and read `scrapelog.requests`, `scrapelog.api_keys`, `scrapelog.alert_rules`, `scrapelog.alert_events` and `scrapelog.users`, and read `system.parts` for the storage measure.
   - `ui_reader` (used by the web UI): read-only on `scrapelog.requests`, `scrapelog.requests_hourly` and `scrapelog.requests_restored`, with a 60 s, 2 GB and 100,000-row limit per query.
   - `archiver` (used by the archive and restore jobs): reads `scrapelog.requests`; writes `archive_days`, `requests_restored` and `archive_restores`; reads and writes S3 only under the bucket's `archive/requests/` prefix through the `archive_s3` named collection; each query is limited to 1 GiB, 2 threads and 900 s.
   - `scrapelog_admin`: full access, for operations such as [TTL changes](#ttl-tuning) and restores.
@@ -94,7 +97,7 @@ All configuration is environment variables in `.env`; Compose passes them to the
 | `CLICKHOUSE_ARCHIVER_PASSWORD` | none, required | Password of the `archiver` user. Required even without S3. |
 | `CLICKHOUSE_ARCHIVER_USER` | `archiver` | ClickHouse user of the archive and restore jobs. |
 | `CLICKHOUSE_DISK_BUDGET_BYTES` | `25000000000` | Storage budget enforced by the API. See [Storage measure](#storage-measure). |
-| `ADMIN_TOKEN` | none, required | Bearer token for `/v1/admin/*` routes and the `keys` command. Also the UI sign-in token. |
+| `ADMIN_TOKEN` | none, required | Bearer token for `/v1/admin/*` routes and the `keys` command. Also the password of the `admin` UI sign-in and the key that signs UI sessions. |
 | `SCRAPELOG_PUBLIC_URL` | empty | Public base URL of the UI, for example `https://scrapelog.example.com`. Alert messages link back to it; empty leaves the link out. |
 | `MAX_BATCH_RECORDS` | `5000` | Maximum records per batch request. |
 | `RATE_LIMIT_RECORDS_PER_MINUTE` | `600000` | Per-key ingest limit in records per minute (10000 per second on average). Must be at least `MAX_BATCH_RECORDS`. |
@@ -204,13 +207,21 @@ All need the admin token. The `scrapelog keys` command inside the `ingest-api` c
 - `REDACT_HEADERS` is matched case-insensitively against the names in both `request_headers` and `response_headers`; matching values are stored as `[REDACTED]`.
 - The default list (`authorization,cookie,proxy-authorization`) does not include `set-cookie`, so responses that set cookies are stored in full. If your scrapers send response headers, add it: `REDACT_HEADERS=authorization,cookie,proxy-authorization,set-cookie`. Setting the variable replaces the default list, it does not extend it.
 - Credentials in `url` (`https://user:pass@host/`) and in `proxy` are removed before storing.
-- Request bodies, response bodies, query strings and other header-like data in `tags` are not redacted. Anyone who can sign in to the UI can read stored request bodies, so scrapers must not send secrets in bodies, URLs or tags.
+- Request bodies, response bodies, query strings and other header-like data in `tags` are not redacted. Anyone who can sign in with `view_requests` can read stored request bodies, so scrapers must not send secrets in bodies, URLs or tags.
 
 ## Web UI
 
 ### Sign in
 
-Open `/` (it redirects to `/requests`) and paste `ADMIN_TOKEN`. It is a single user. The session cookie lasts 7 days and is marked `Secure` behind HTTPS (`X-Forwarded-Proto: https`). Rotating `ADMIN_TOKEN` signs everyone out. Sign-in allows 10 attempts per minute per client address; see [Cloudflare and reverse proxy](#cloudflare-and-reverse-proxy) for why the proxy must set `X-Real-IP`.
+Open `/` (it redirects to `/requests`) and sign in as `admin` with `ADMIN_TOKEN` as the password, or as a user account with its password. Permissions are checked on every request:
+
+- A permission change applies on the user's next request.
+- A password reset or a disable ends that user's sessions.
+- An admin session ends only on expiry or when `ADMIN_TOKEN` is rotated. Rotating signs everyone out, and users sign back in with their unchanged password.
+- Signing out clears the browser cookie but does not revoke a copied cookie.
+- User changes assume a single `ingest-api` instance.
+
+The session cookie lasts 7 days and is marked `Secure` behind HTTPS (`X-Forwarded-Proto: https`). Sign-in allows 10 attempts per minute per client address; see [Cloudflare and reverse proxy](#cloudflare-and-reverse-proxy) for why the proxy must set `X-Real-IP`.
 
 ### Requests
 
@@ -272,7 +283,7 @@ The UI does not chart disk use. Use `GET /v1/admin/storage`.
 
 - Records may carry `request_body` and `request_body_encoding` (`utf8`, the default, or `base64`). Base64 uses the standard alphabet and the size is measured after decoding.
 - A body larger than `MAX_BODY_BYTES` (default 2097152) rejects that record with an error; it is never truncated.
-- Bodies are stored verbatim and are visible to anyone who can sign in to the UI, so scrapers must not put credentials in bodies. They are never logged.
+- Bodies are stored verbatim and are visible to anyone who can sign in with `view_requests`, so scrapers must not put credentials in bodies. They are never logged.
 - The `request_body` columns exist only in a freshly initialised ClickHouse volume; recreate the volume to pick them up.
 
 ## Response bodies

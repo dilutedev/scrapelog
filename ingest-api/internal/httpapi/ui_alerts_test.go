@@ -94,7 +94,7 @@ func (store *fakeAlertStore) ListEvents(ctx context.Context, ruleID string, limi
 
 func newAlertsHandler(store AlertStore, refresher AlertRuleRefresher) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, store, refresher, nil, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, config.Config{AdminToken: testAdminToken})
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, store, refresher, nil, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, &fakeUserDirectory{}, config.Config{AdminToken: testAdminToken})
 }
 
 type fakeAlertTester struct {
@@ -109,7 +109,7 @@ func (tester *fakeAlertTester) SendTest(ctx context.Context, rule alerts.Rule) a
 
 func newAlertsHandlerWithTester(store AlertStore, tester AlertTester) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, store, &fakeRefresher{}, tester, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, config.Config{AdminToken: testAdminToken})
+	return NewHandler(context.Background(), logger, &fakePinger{}, &fakeKeyStore{}, &fakeRefresher{}, &fakeRecordWriter{}, &fakeBodyStore{}, &fakeStorageReporter{}, &fakeDiskGuard{}, &fakeRequestReader{}, nil, store, &fakeRefresher{}, tester, emptyAlertMatcher(), &fakeAlertQueue{}, false, nil, nil, nil, &fakeUserDirectory{}, config.Config{AdminToken: testAdminToken})
 }
 
 func alertRequest(method string, target string, body string) *http.Request {

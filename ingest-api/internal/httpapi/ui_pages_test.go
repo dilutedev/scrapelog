@@ -34,7 +34,7 @@ func TestLoginPageRendersWithoutSession(t *testing.T) {
 		t.Fatalf("content type %q, want text/html", contentType)
 	}
 	body := recorder.Body.String()
-	if !strings.Contains(body, `id="admin-token"`) || !strings.Contains(body, "login.js") || !versionedCSSPattern.MatchString(body) {
+	if !strings.Contains(body, `id="login-username"`) || !strings.Contains(body, "login.js") || !versionedCSSPattern.MatchString(body) {
 		t.Fatalf("login page is missing expected content:\n%s", body)
 	}
 	for _, forbidden := range []string{"<script>", "style=", " onclick=", " onsubmit=", " onload="} {
@@ -77,7 +77,7 @@ func TestUIPagesAndAssetsCarrySecurityHeaders(t *testing.T) {
 func TestSessionGatedPageRedirectsOrRenders(t *testing.T) {
 	signer := newTestSigner()
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	gatedPage := withSecurityHeaders(requireSessionPage(signer, ui.PageHandler(logger, "login")))
+	gatedPage := withSecurityHeaders(requirePagePermission(signer, &fakeUserDirectory{}, []string{users.ViewRequests}, ui.PageHandler(logger, "login")))
 
 	withoutSession := serve(gatedPage, cookieRequest(http.MethodGet, "/requests?q=a", ""))
 	if withoutSession.Code != http.StatusFound {
@@ -92,7 +92,7 @@ func TestSessionGatedPageRedirectsOrRenders(t *testing.T) {
 	if withSession.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200", withSession.Code)
 	}
-	if !strings.Contains(withSession.Body.String(), `id="admin-token"`) {
+	if !strings.Contains(withSession.Body.String(), `id="login-username"`) {
 		t.Fatal("page not rendered with a valid session")
 	}
 }
