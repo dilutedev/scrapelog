@@ -95,6 +95,38 @@ func TestLookup(test *testing.T) {
 	}
 }
 
+func TestList(test *testing.T) {
+	baseTime := time.Now().UTC().Truncate(time.Millisecond)
+	newest := hashedRecord(test, "id-1", "alice", "alice password 1")
+	newest.CreatedAt = baseTime.Add(time.Minute)
+	oldest := hashedRecord(test, "id-2", "zed", "zed password 123")
+	oldest.CreatedAt = baseTime
+	tiedLater := hashedRecord(test, "id-3", "bob", "bob password 123")
+	tiedLater.CreatedAt = baseTime
+	directory, _ := loadedDirectory(test, newest, oldest, tiedLater)
+	records, err := directory.List()
+	if err != nil {
+		test.Fatalf("List: %v", err)
+	}
+	var usernames []string
+	for _, record := range records {
+		usernames = append(usernames, record.Username)
+	}
+	if !slices.Equal(usernames, []string{"bob", "zed", "alice"}) {
+		test.Fatalf("List order = %v", usernames)
+	}
+	records[0].Username = "changed"
+	if again, _ := directory.List(); again[0].Username != "bob" {
+		test.Fatal("List returned a slice that aliases the directory")
+	}
+}
+
+func TestListBeforeLoadIsUnavailable(test *testing.T) {
+	if _, err := NewDirectory(&fakeRowStore{}).List(); !errors.Is(err, ErrUnavailable) {
+		test.Fatalf("List error = %v", err)
+	}
+}
+
 func TestVerifyLogin(test *testing.T) {
 	disabled := hashedRecord(test, "id-2", "bob", "bob password 123")
 	disabled.Disabled = true

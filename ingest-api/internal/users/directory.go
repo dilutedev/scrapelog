@@ -1,6 +1,7 @@
 package users
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"slices"
@@ -95,6 +96,24 @@ func (directory *Directory) Lookup(userID string) (Record, error) {
 		return Record{}, ErrUserNotFound
 	}
 	return record, nil
+}
+
+func (directory *Directory) List() ([]Record, error) {
+	snapshot := directory.snapshot.Load()
+	if snapshot == nil {
+		return nil, ErrUnavailable
+	}
+	records := make([]Record, 0, len(snapshot.usersByID))
+	for _, record := range snapshot.usersByID {
+		records = append(records, record)
+	}
+	slices.SortFunc(records, func(left Record, right Record) int {
+		if byCreation := left.CreatedAt.Compare(right.CreatedAt); byCreation != 0 {
+			return byCreation
+		}
+		return cmp.Compare(left.Username, right.Username)
+	})
+	return records, nil
 }
 
 func (directory *Directory) VerifyLogin(username string, password string) (Record, error) {
