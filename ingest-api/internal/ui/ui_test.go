@@ -88,7 +88,7 @@ func TestTopbarMarksCurrentSection(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			var rendered bytes.Buffer
-			if err := pageTemplates.ExecuteTemplate(&rendered, "topbar", pageData{AssetVersion: "v", Page: test.page}); err != nil {
+			if err := pageTemplates.ExecuteTemplate(&rendered, "topbar", pageData{AssetVersion: "v", Page: test.page, Viewer: Viewer{IsAdmin: true, Permissions: []string{"view_requests", "view_bandwidth", "view_alerts", "manage_alerts", "view_archives"}}}); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			output := rendered.String()

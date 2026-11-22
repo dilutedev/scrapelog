@@ -13,6 +13,7 @@ import (
 
 	"github.com/dilutedev/scrapelog/ingest-api/internal/ratelimit"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/session"
+	"github.com/dilutedev/scrapelog/ingest-api/internal/ui"
 	"github.com/dilutedev/scrapelog/ingest-api/internal/users"
 )
 
@@ -36,6 +37,7 @@ type loginRequest struct {
 }
 
 type principal struct {
+	username    string
 	isAdmin     bool
 	permissions []string
 }
@@ -50,6 +52,14 @@ func (sessionPrincipal principal) allows(anyOf []string) bool {
 		}
 	}
 	return false
+}
+
+func (sessionPrincipal principal) viewer() ui.Viewer {
+	permissions := sessionPrincipal.permissions
+	if sessionPrincipal.isAdmin {
+		permissions = users.AllPermissions
+	}
+	return ui.Viewer{Username: sessionPrincipal.username, IsAdmin: sessionPrincipal.isAdmin, Permissions: permissions}
 }
 
 func withSecurityHeaders(next http.HandlerFunc) http.HandlerFunc {
@@ -90,7 +100,7 @@ func resolvePrincipal(signer *session.Signer, userDirectory UserDirectory, reque
 		return principal{}, errNoSession
 	}
 	if claims.Subject == users.AdminUsername {
-		return principal{isAdmin: true}, nil
+		return principal{username: users.AdminUsername, isAdmin: true}, nil
 	}
 	record, err := userDirectory.Lookup(claims.Subject)
 	if errors.Is(err, users.ErrUnavailable) {
@@ -99,7 +109,7 @@ func resolvePrincipal(signer *session.Signer, userDirectory UserDirectory, reque
 	if err != nil || record.Disabled || record.SessionVersion != claims.SessionVersion {
 		return principal{}, errNoSession
 	}
-	return principal{permissions: record.Permissions}, nil
+	return principal{username: record.Username, permissions: record.Permissions}, nil
 }
 
 func requireSession(signer *session.Signer, userDirectory UserDirectory, next http.HandlerFunc) http.HandlerFunc {
@@ -144,7 +154,7 @@ func requirePagePermission(signer *session.Signer, userDirectory UserDirectory, 
 			http.Error(responseWriter, "You don't have permission to open this page.", http.StatusForbidden)
 			return
 		}
-		next(responseWriter, request)
+		next(responseWriter, request.WithContext(ui.WithViewer(request.Context(), sessionPrincipal.viewer())))
 	}
 }
 
