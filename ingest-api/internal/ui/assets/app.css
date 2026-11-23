@@ -2063,3 +2063,65 @@ dialog.sheet::backdrop {
     animation: none;
   }
 }
+
+html.pull-to-refresh {
+  overscroll-behavior-y: contain;
+}
+
+.pull-indicator {
+  position: fixed;
+  top: calc(var(--header-height) + env(safe-area-inset-top));
+  left: 50%;
+  z-index: 9;
+  box-sizing: border-box;
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-top: -2.5rem;
+  border-radius: var(--radius-pill);
+  background: var(--sheet);
+  border: 1px solid var(--rule-soft);
+  box-shadow: var(--shadow-2);
+  opacity: var(--pull-progress, 0);
+  transform: translate(-50%, var(--pull-offset, 0px));
+  pointer-events: none;
+  transition: transform 200ms ease-out, opacity 200ms ease-out;
+}
+
+.pull-indicator::after {
+  content: "";
+  position: absolute;
+  inset: 0.625rem;
+  border: 2px solid var(--rule);
+  border-top-color: var(--ink);
+  border-radius: var(--radius-pill);
+  transform: rotate(calc(var(--pull-progress, 0) * 270deg));
+}
+
+.pull-indicator.dragging {
+  transition: none;
+}
+
+.pull-indicator.armed::after {
+  border-color: var(--ink);
+  border-top-color: transparent;
+}
+
+.pull-indicator.refreshing::after {
+  animation: pull-spin 800ms linear infinite;
+}
+
+@keyframes pull-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pull-indicator {
+    transition: none;
+  }
+
+  .pull-indicator.refreshing::after {
+    animation: none;
+  }
+}

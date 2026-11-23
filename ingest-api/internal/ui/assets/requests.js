@@ -2,6 +2,7 @@ import { apiFetch, networkErrorMessage } from "./shell.js";
 import { addQueryTerm, attachFacetAutocomplete, canFilter, formatQueryTerm } from "./requests-query.js";
 import { renderTape } from "./requests-tape.js";
 import { showRequestDetail } from "./requests-detail.js";
+import { attachPullToRefresh } from "./gestures.js";
 
 const presetSeconds = { "15m": 900, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "14d": 1209600, "30d": 2592000, "60d": 5184000 };
 const defaultPreset = "1h";
@@ -25,6 +26,7 @@ const resultsSection = resultsRows.closest("section");
 const tapeSection = tapeChart.parentElement;
 const loadOlderButton = document.getElementById("load-older");
 const detailPane = document.getElementById("detail-pane");
+const querySuggestions = document.getElementById("query-suggestions");
 
 let queryText = "";
 let restoreId = "";
@@ -472,8 +474,9 @@ window.addEventListener("popstate", () => {
   runSearch({ push: false });
 });
 
-attachFacetAutocomplete(queryInput, document.getElementById("query-suggestions"), () => resolvedRange || resolveRange(), sourceParameters);
+attachFacetAutocomplete(queryInput, querySuggestions, () => resolvedRange || resolveRange(), sourceParameters);
 
 readUrlState();
 loadRestores();
+attachPullToRefresh(() => runSearch({ push: false }), [tapeSection, detailPane, querySuggestions]);
 runSearch({ push: false });

@@ -1,5 +1,6 @@
 import { apiFetch, can, formatBytes } from "./shell.js";
 import { confirmSheet } from "./sheet.js";
+import { attachPullToRefresh } from "./gestures.js";
 
 const pollIntervalMilliseconds = 3000;
 
@@ -195,10 +196,11 @@ if (restoreForm) {
 
 async function load() {
   let archives;
+  errorElement.hidden = true;
   if (!archiveList) {
     sectionsElement.hidden = false;
     if (restoreList) {
-      loadRestores();
+      await loadRestores();
     }
     return;
   }
@@ -218,7 +220,8 @@ async function load() {
   sectionsElement.hidden = false;
   archiveList.replaceChildren(...archives.archives.map(renderArchive));
   archivesEmpty.hidden = archives.archives.length > 0;
-  loadRestores();
+  await loadRestores();
 }
 
 load();
+attachPullToRefresh(load);

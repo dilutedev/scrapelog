@@ -1,6 +1,7 @@
 import { apiFetch, can } from "./shell.js";
 import { canFilter, formatQueryTerm } from "./requests-query.js";
 import { channelLabels, describeRule } from "./alert-rules.js";
+import { attachPullToRefresh } from "./gestures.js";
 
 const eventLimit = 200;
 const recentAlertCount = 50;
@@ -128,6 +129,7 @@ function renderEvent(alertEvent, todayStart) {
 async function load() {
   let rules;
   let events;
+  errorElement.hidden = true;
   pageElement.setAttribute("aria-busy", "true");
   try {
     [rules, events] = await Promise.all([
@@ -143,6 +145,8 @@ async function load() {
   pageElement.removeAttribute("aria-busy");
   const todayStart = startOfToday();
   const truncated = events.length === eventLimit && new Date(events[eventLimit - 1].fired_at) >= todayStart;
+  ruleList.replaceChildren();
+  eventList.replaceChildren();
   rulesEmpty.hidden = rules.length > 0;
   for (const rule of rules) {
     const todayEvents = events.filter((alertEvent) => alertEvent.rule_id === rule.rule_id && new Date(alertEvent.fired_at) >= todayStart);
@@ -156,3 +160,4 @@ async function load() {
 }
 
 load();
+attachPullToRefresh(load);
