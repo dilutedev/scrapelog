@@ -629,6 +629,80 @@ select {
   font-family: var(--font-mono);
 }
 
+.filters-button {
+  display: none;
+}
+
+.filters-panel {
+  display: contents;
+}
+
+.query-bar > .filters-panel > .export-menu {
+  order: 1;
+}
+
+.sheet-title {
+  margin: 0 0 var(--space-4);
+  font-size: var(--size-large);
+}
+
+.sheet .filters-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sheet .filter-field select {
+  width: 100%;
+}
+
+.sheet .filters-panel .visually-hidden {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0 0 var(--space-1);
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+  display: block;
+  font-size: var(--size-small);
+  font-weight: 600;
+}
+
+.sheet .export-menu summary {
+  display: none;
+}
+
+.sheet .export-menu-panel {
+  position: static;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: none;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.sheet .export-menu-panel::before {
+  content: "Download";
+  flex-basis: 100%;
+  font-size: var(--size-small);
+  font-weight: 600;
+}
+
+.sheet .export-menu-panel button {
+  flex: 1 1 0;
+}
+
+.sheet .export-menu-panel .note {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 .export-menu {
   position: relative;
 }
@@ -1292,9 +1366,21 @@ select {
     flex-basis: 100%;
   }
 
-  .query-bar select {
-    flex: 1 1 100%;
+  .query-bar > .filters-panel {
+    display: none;
+  }
+
+  .filters-button {
+    display: block;
+    flex: 1 1 0;
     min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .query-bar > button[type="submit"] {
+    flex: 1 1 0;
   }
 
   #query-suggestions {
@@ -2025,7 +2111,8 @@ dialog.sheet.sheet-dragging {
   gap: var(--space-3);
 }
 
-.sheet-actions button[value="cancel"] {
+.sheet-actions button[value="cancel"],
+.sheet-actions button[type="button"] {
   background: var(--sheet);
   color: var(--ink);
   border-color: var(--rule-soft);

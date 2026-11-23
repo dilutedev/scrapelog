@@ -3,6 +3,7 @@ import { addQueryTerm, attachFacetAutocomplete, canFilter, formatQueryTerm } fro
 import { renderTape } from "./requests-tape.js";
 import { showRequestDetail } from "./requests-detail.js";
 import { attachPullToRefresh } from "./gestures.js";
+import { attachFiltersSheet } from "./requests-filters.js";
 
 const presetSeconds = { "15m": 900, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "14d": 1209600, "30d": 2592000, "60d": 5184000 };
 const defaultPreset = "1h";
@@ -12,6 +13,9 @@ const queryForm = document.getElementById("query-form");
 const exportMenu = document.querySelector(".export-menu");
 const queryInput = document.getElementById("query-input");
 const sourceSelect = document.getElementById("source-select");
+const sourceField = document.getElementById("source-field");
+const filtersButton = document.getElementById("filters-button");
+const filtersPanel = document.getElementById("filters-panel");
 const rangeSelect = document.getElementById("range-select");
 const customOption = rangeSelect.querySelector('option[value="custom"]');
 const queryError = document.getElementById("query-error");
@@ -84,7 +88,7 @@ function syncSourceSelect() {
     sourceSelect.append(restoreOption);
   }
   sourceSelect.value = restoreId;
-  sourceSelect.hidden = sourceSelect.options.length <= 1;
+  sourceField.hidden = sourceSelect.options.length <= 1;
 }
 
 async function loadRestores() {
@@ -266,7 +270,16 @@ function applyRange(fromDate, toDate) {
   runSearch({ push: true });
 }
 
+function syncFiltersSummary() {
+  const summaryParts = ["Filters", rangeSelection.preset ?? "Custom"];
+  if (restoreId) {
+    summaryParts.push("Restore");
+  }
+  filtersButton.textContent = summaryParts.join(" · ");
+}
+
 async function runSearch({ push }) {
+  syncFiltersSummary();
   resolvedRange = resolveRange();
   writeUrlState(push);
   queryError.hidden = true;
@@ -464,6 +477,7 @@ exportMenu.addEventListener("click", (clickEvent) => {
   const formatName = clickEvent.target.closest("[data-export-format]")?.dataset.exportFormat;
   if (formatName) {
     downloadExport(formatName);
+    exportMenu.closest("dialog")?.close();
   }
 });
 
@@ -478,5 +492,6 @@ attachFacetAutocomplete(queryInput, querySuggestions, () => resolvedRange || res
 
 readUrlState();
 loadRestores();
+attachFiltersSheet(filtersButton, filtersPanel, exportMenu);
 attachPullToRefresh(() => runSearch({ push: false }), [tapeSection, detailPane, querySuggestions]);
 runSearch({ push: false });
