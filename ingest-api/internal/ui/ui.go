@@ -89,11 +89,15 @@ func (data pageData) PermissionList() string {
 }
 
 func (data pageData) NavigationLinks() []navigationLink {
+	return data.visibleLinks(false)
+}
+
+func (data pageData) visibleLinks(includeAdminOnly bool) []navigationLink {
 	links := []navigationLink{}
 	for _, entry := range navigationEntries {
 		visible := data.CanAny(entry.AnyOf...)
 		if entry.AdminOnly {
-			visible = data.Viewer.IsAdmin
+			visible = includeAdminOnly && data.Viewer.IsAdmin
 		}
 		if visible {
 			links = append(links, navigationLink{Path: entry.Path, Label: entry.Label, Current: slices.Contains(entry.Pages, data.Page)})
@@ -127,7 +131,7 @@ func assetTreeVersion() string {
 }
 
 func firstLink(viewer Viewer) (navigationLink, bool) {
-	links := pageData{Viewer: viewer}.NavigationLinks()
+	links := pageData{Viewer: viewer}.visibleLinks(true)
 	if len(links) == 0 {
 		return navigationLink{}, false
 	}
