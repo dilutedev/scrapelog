@@ -440,4 +440,4 @@ Each phase is implemented by a Sonnet agent and reviewed by Opus before the next
 
 - **Existing install migration:** the plan has you apply `002_alerts.sql` manually once (documented). The alternative is having the API create the tables at startup, which needs CREATE grants on `ingest_writer`. Manual is assumed.
 - **Fonts:** the Atkinson Hyperlegible Next and Mono woff2 files get vendored, about 150 KB total. Say so if you'd rather use system fonts.
-- **Dark mode:** not planned. Light theme only.
+- **Dark mode:** a Dracula-based dark theme, following the OS setting and switchable from the topbar; the choice is stored per device in localStorage.
