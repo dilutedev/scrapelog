@@ -96,12 +96,17 @@ func TestTopbarMarksCurrentSection(t *testing.T) {
 			}
 			output := rendered.String()
 			wantFragments := []string{
-				`<a href="/requests" aria-current="` + test.requestsCurrent + `">Requests</a>`,
-				`<a href="/bandwidth" aria-current="` + test.bandwidthCurrent + `">Bandwidth</a>`,
-				`<a href="/alerts" aria-current="` + test.alertsCurrent + `">Alerts</a>`,
-				`<a href="/archive" aria-current="` + test.archiveCurrent + `">Archive</a>`,
+				`class="account-menu"`,
 				`id="sign-out"`,
 				`/assets/v/shell.js`,
+			}
+			currentStates := map[string]string{"/requests": test.requestsCurrent, "/bandwidth": test.bandwidthCurrent, "/alerts": test.alertsCurrent, "/archive": test.archiveCurrent}
+			linkLabels := map[string]string{"/requests": "Requests", "/bandwidth": "Bandwidth", "/alerts": "Alerts", "/archive": "Archive"}
+			for linkPath, currentState := range currentStates {
+				linkPattern := regexp.MustCompile(`(?s)<a href="` + linkPath + `" aria-current="` + currentState + `"><svg class="nav-icon".*?</svg><span class="nav-label">` + linkLabels[linkPath] + `</span></a>`)
+				if !linkPattern.MatchString(output) {
+					t.Fatalf("output missing %s link with aria-current=%s:\n%s", linkPath, currentState, output)
+				}
 			}
 			for _, fragment := range wantFragments {
 				if !strings.Contains(output, fragment) {
@@ -132,6 +137,32 @@ func TestScriptsUseNoHTMLSinks(t *testing.T) {
 			if strings.Contains(string(content), forbidden) {
 				t.Errorf("%s contains %q", filePath, forbidden)
 			}
+		}
+		return nil
+	})
+	if walkError != nil {
+		t.Fatalf("unexpected error: %v", walkError)
+	}
+}
+
+func TestScriptsDoNotUseNativeConfirm(t *testing.T) {
+	nativeConfirm := regexp.MustCompile(`(^|[^A-Za-z_.])confirm\(`)
+	walkError := fs.WalkDir(embeddedFiles, "assets", func(filePath string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() && filePath == "assets/vendor" {
+			return fs.SkipDir
+		}
+		if entry.IsDir() || path.Ext(filePath) != ".js" {
+			return nil
+		}
+		content, readErr := fs.ReadFile(embeddedFiles, filePath)
+		if readErr != nil {
+			return readErr
+		}
+		if nativeConfirm.Match(content) {
+			t.Errorf("%s calls the native confirm()", filePath)
 		}
 		return nil
 	})
@@ -179,9 +210,18 @@ func TestTopbarShowsUsersLinkOnlyToAdmin(t *testing.T) {
 			if err := pageTemplates.ExecuteTemplate(&rendered, "topbar", pageData{AssetVersion: "v", Page: "users", Viewer: test.viewer}); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			hasLink := strings.Contains(rendered.String(), `<a href="/users" aria-current="page">Users</a>`)
-			if hasLink != test.wantLink {
-				t.Fatalf("Users link present = %v, want %v:\n%s", hasLink, test.wantLink, rendered.String())
+			output := rendered.String()
+			linkIndex := strings.Index(output, `<a href="/users" aria-current="page">Users</a>`)
+			if (linkIndex >= 0) != test.wantLink {
+				t.Fatalf("Users link present = %v, want %v:\n%s", linkIndex >= 0, test.wantLink, output)
+			}
+			if test.wantLink {
+				if linkIndex < strings.Index(output, "</nav>") {
+					t.Fatalf("Users link must sit after the nav, inside the account menu:\n%s", output)
+				}
+				if linkIndex < strings.Index(output, `<details class="account-menu"`) {
+					t.Fatalf("Users link must sit inside the account menu:\n%s", output)
+				}
 			}
 		})
 	}
@@ -201,9 +241,13 @@ func TestTopbarShowsProjectsLinkOnlyToAdmin(t *testing.T) {
 			if err := pageTemplates.ExecuteTemplate(&rendered, "topbar", pageData{AssetVersion: "v", Page: "projects", Viewer: test.viewer}); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			hasLink := strings.Contains(rendered.String(), `<a href="/projects" aria-current="page">Projects</a>`)
-			if hasLink != test.wantLink {
-				t.Fatalf("Projects link present = %v, want %v:\n%s", hasLink, test.wantLink, rendered.String())
+			output := rendered.String()
+			linkIndex := strings.Index(output, `<a href="/projects" aria-current="page">Projects</a>`)
+			if (linkIndex >= 0) != test.wantLink {
+				t.Fatalf("Projects link present = %v, want %v:\n%s", linkIndex >= 0, test.wantLink, output)
+			}
+			if test.wantLink && linkIndex < strings.Index(output, `<details class="account-menu"`) {
+				t.Fatalf("Projects link must sit inside the account menu:\n%s", output)
 			}
 		})
 	}
@@ -219,6 +263,19 @@ func TestProjectsPageRendersFormAndPanel(t *testing.T) {
 		if !strings.Contains(output, fragment) {
 			t.Errorf("output missing %q", fragment)
 		}
+	}
+}
+
+func TestUsersIsReachableHomeButNotANavigationLink(t *testing.T) {
+	adminViewer := Viewer{IsAdmin: true}
+	for _, link := range (pageData{Viewer: adminViewer}).NavigationLinks() {
+		if link.Path == "/users" {
+			t.Fatalf("NavigationLinks must not include /users, got %+v", link)
+		}
+	}
+	homePath, found := HomePath(adminViewer)
+	if !found || homePath != "/users" {
+		t.Fatalf("HomePath = %q, %v, want /users, true", homePath, found)
 	}
 }
 
@@ -240,6 +297,29 @@ func TestUsersPageRendersFormAndEveryPermission(t *testing.T) {
 	}
 	if got := strings.Count(output, `name="permission"`); got != len(users.AllPermissions) {
 		t.Errorf("checkbox count = %d, want %d", got, len(users.AllPermissions))
+	}
+}
+
+func TestAlertEditKeepsDeleteRuleOutOfTheActionBar(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := pageTemplates.ExecuteTemplate(&rendered, "alert-edit.html", pageData{AssetVersion: "v", Page: "alert-edit", Viewer: Viewer{IsAdmin: true}}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	output := rendered.String()
+	actionBarStart := strings.Index(output, `<div class="editor-actions">`)
+	if actionBarStart < 0 {
+		t.Fatalf("output missing the editor-actions bar:\n%s", output)
+	}
+	actionBarEnd := actionBarStart + strings.Index(output[actionBarStart:], "</div>")
+	actionBar := output[actionBarStart:actionBarEnd]
+	for _, fragment := range []string{`id="send-test"`, `id="save-rule"`} {
+		if !strings.Contains(actionBar, fragment) {
+			t.Errorf("action bar missing %q", fragment)
+		}
+	}
+	deleteIndex := strings.Index(output, `id="delete-rule"`)
+	if deleteIndex < actionBarEnd {
+		t.Fatalf("delete-rule must sit after the action bar, found at %d, bar ends at %d", deleteIndex, actionBarEnd)
 	}
 }
 
@@ -325,8 +405,8 @@ func TestEveryPageIncludesHeadPartial(t *testing.T) {
 		}
 		pageNames = append(pageNames, entry.Name())
 	}
-	if len(pageNames) != 9 {
-		t.Fatalf("found %d pages %v, want 9", len(pageNames), pageNames)
+	if len(pageNames) != 10 {
+		t.Fatalf("found %d pages %v, want 10", len(pageNames), pageNames)
 	}
 	wantFragments := []string{
 		`href="/assets/v/manifest.json" crossorigin="use-credentials"`,
@@ -334,6 +414,7 @@ func TestEveryPageIncludesHeadPartial(t *testing.T) {
 		`rel="apple-touch-icon"`,
 		`name="theme-color"`,
 		`src="/assets/v/theme-init.js"`,
+		`name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"`,
 	}
 	for _, pageName := range pageNames {
 		t.Run(pageName, func(t *testing.T) {
@@ -346,10 +427,32 @@ func TestEveryPageIncludesHeadPartial(t *testing.T) {
 					t.Fatalf("output missing %q", fragment)
 				}
 			}
+			if viewportCount := strings.Count(rendered.String(), `name="viewport"`); viewportCount != 1 {
+				t.Fatalf("found %d viewport meta tags, want 1", viewportCount)
+			}
 			if strings.Index(rendered.String(), "theme-init.js") > strings.Index(rendered.String(), "app.css") {
 				t.Fatal("theme-init.js must come before app.css so the theme is set before first paint")
 			}
 		})
+	}
+}
+
+func TestLoginHasShowPasswordToggle(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := pageTemplates.ExecuteTemplate(&rendered, "login.html", pageData{AssetVersion: "v"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{`id="login-password-toggle"`, `aria-controls="login-password"`, `aria-pressed="false"`, `type="button"`} {
+		if !strings.Contains(rendered.String(), want) {
+			t.Fatalf("login page missing %q", want)
+		}
+	}
+	script, err := fs.ReadFile(embeddedFiles, "assets/login.js")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(string(script), "login-password-toggle") {
+		t.Fatal("login.js does not wire the password toggle")
 	}
 }
 

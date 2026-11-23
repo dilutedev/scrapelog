@@ -154,13 +154,14 @@ export function showRequestDetail(paneElement, rowSummary, sourceParameters, cal
     attachPaneListeners(paneElement);
   }
   paneElement.replaceChildren(createElementWithText("p", "Loading request…"));
+  paneElement.scrollTop = 0;
   paneElement.hidden = false;
   document.getElementById("explorer-body").classList.add("pane-open");
 
   const isCurrent = () => activeRequestToken === requestToken;
   apiFetch("/ui/api/request?" + keyParameters).then(
     (detail) => {
-      if (isCurrent()) {
+      if (isCurrent() && !paneElement.hidden) {
         renderDetail(paneElement, detail, keyParameters, isCurrent, callbacks);
       }
     },
@@ -172,6 +173,22 @@ export function showRequestDetail(paneElement, rowSummary, sourceParameters, cal
   );
 }
 
+function applyNavigation(rootElement) {
+  const previousButton = rootElement.querySelector(".previous-button");
+  if (!previousButton) {
+    return;
+  }
+  const { hasPrevious, hasNext } = activeCallbacks.getNavigation();
+  previousButton.disabled = !hasPrevious;
+  rootElement.querySelector(".next-button").disabled = !hasNext;
+}
+
+export function refreshDetailNavigation(paneElement) {
+  if (!paneElement.hidden) {
+    applyNavigation(paneElement);
+  }
+}
+
 function renderDetail(paneElement, detail, keyParameters, isCurrent, callbacks) {
   const headerRow = document.createElement("div");
   headerRow.className = "detail-header";
@@ -179,7 +196,15 @@ function renderDetail(paneElement, detail, keyParameters, isCurrent, callbacks) 
   backButton.addEventListener("click", () => callbacks.onClose());
   const closeButton = createButton("Close", "close-button");
   closeButton.addEventListener("click", () => callbacks.onClose());
-  headerRow.append(backButton, closeButton);
+  const previousButton = createButton("Previous", "previous-button");
+  previousButton.addEventListener("click", () => callbacks.onNavigate(-1));
+  const nextButton = createButton("Next", "next-button");
+  nextButton.addEventListener("click", () => callbacks.onNavigate(1));
+  const navigationGroup = document.createElement("span");
+  navigationGroup.className = "detail-navigation";
+  navigationGroup.append(previousButton, nextButton);
+  headerRow.append(backButton, navigationGroup, closeButton);
+  applyNavigation(headerRow);
 
   const heading = createElementWithText("h2", `${detail.method} ${detail.url}`, "detail-title");
   heading.tabIndex = -1;

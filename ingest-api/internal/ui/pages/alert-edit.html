@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Alert rule · scrapelog</title>
 {{template "head" .}}
 <script type="module" src="/assets/{{.AssetVersion}}/alert-edit.js"></script>
@@ -45,9 +44,9 @@
 <div class="editor-actions">
 <button type="button" id="send-test" disabled>Send test message</button>
 <button type="submit" id="save-rule">Save rule</button>
-<button type="button" id="delete-rule" hidden>Delete rule</button>
 </div>
 <p id="test-note" class="note">Save the rule first to send a test message.</p>
+<button type="button" id="delete-rule" class="danger-button" hidden>Delete rule</button>
 </form>
 </main>
 </body>

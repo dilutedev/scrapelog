@@ -1,16 +1,24 @@
 import { apiFetch, networkErrorMessage } from "./shell.js";
 import { addQueryTerm, attachFacetAutocomplete, canFilter, formatQueryTerm } from "./requests-query.js";
 import { renderTape } from "./requests-tape.js";
-import { showRequestDetail } from "./requests-detail.js";
+import { refreshDetailNavigation, showRequestDetail } from "./requests-detail.js";
+import { attachPullToRefresh, trackHorizontalSwipe, trackVerticalDrag } from "./gestures.js";
+import { attachFiltersSheet } from "./requests-filters.js";
 
 const presetSeconds = { "15m": 900, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "14d": 1209600, "30d": 2592000, "60d": 5184000 };
 const defaultPreset = "1h";
 const pathTailLength = 24;
+const detailHistoryMarker = { requestDetail: true };
+const detailDismissDistance = 96;
+const overlayMediaQuery = window.matchMedia("(max-width: 1023px)");
 
 const queryForm = document.getElementById("query-form");
 const exportMenu = document.querySelector(".export-menu");
 const queryInput = document.getElementById("query-input");
 const sourceSelect = document.getElementById("source-select");
+const sourceField = document.getElementById("source-field");
+const filtersButton = document.getElementById("filters-button");
+const filtersPanel = document.getElementById("filters-panel");
 const rangeSelect = document.getElementById("range-select");
 const customOption = rangeSelect.querySelector('option[value="custom"]');
 const queryError = document.getElementById("query-error");
@@ -25,6 +33,7 @@ const resultsSection = resultsRows.closest("section");
 const tapeSection = tapeChart.parentElement;
 const loadOlderButton = document.getElementById("load-older");
 const detailPane = document.getElementById("detail-pane");
+const querySuggestions = document.getElementById("query-suggestions");
 
 let queryText = "";
 let restoreId = "";
@@ -36,6 +45,8 @@ let nextCursor = null;
 let rows = [];
 let searchSequence = 0;
 let selectedRowElement = null;
+let detailHistoryState = "closed";
+let renderedSearch = "";
 
 const timeFormatter = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 
@@ -82,7 +93,7 @@ function syncSourceSelect() {
     sourceSelect.append(restoreOption);
   }
   sourceSelect.value = restoreId;
-  sourceSelect.hidden = sourceSelect.options.length <= 1;
+  sourceField.hidden = sourceSelect.options.length <= 1;
 }
 
 async function loadRestores() {
@@ -127,7 +138,8 @@ function writeUrlState(push) {
     urlParameters.set("to", rangeSelection.to.toISOString());
   }
   const newSearch = "?" + urlParameters.toString();
-  if (push && newSearch !== location.search) {
+  renderedSearch = newSearch;
+  if (push && newSearch !== location.search && detailHistoryState === "closed") {
     history.pushState(null, "", location.pathname + newSearch);
   } else {
     history.replaceState(null, "", location.pathname + newSearch);
@@ -240,9 +252,19 @@ function resetDetailSelection() {
   detailPane.replaceChildren();
   explorerBody.classList.remove("pane-open");
   selectedRowElement = null;
+  detailHistoryState = "closed";
+  detailPane.classList.remove("dragging");
+  setDetailDragOffset(0, 0);
 }
 
 function closeDetail() {
+  if (detailHistoryState === "open") {
+    detailHistoryState = "closing";
+    history.back();
+  }
+}
+
+function hideDetail() {
   const closedRowElement = selectedRowElement;
   resetDetailSelection();
   if (closedRowElement) {
@@ -264,7 +286,16 @@ function applyRange(fromDate, toDate) {
   runSearch({ push: true });
 }
 
+function syncFiltersSummary() {
+  const summaryParts = ["Filters", rangeSelection.preset ?? "Custom"];
+  if (restoreId) {
+    summaryParts.push("Restore");
+  }
+  filtersButton.textContent = summaryParts.join(" · ");
+}
+
 async function runSearch({ push }) {
+  syncFiltersSummary();
   resolvedRange = resolveRange();
   writeUrlState(push);
   queryError.hidden = true;
@@ -339,6 +370,7 @@ async function loadOlder() {
     }
     nextCursor = page.next_cursor;
     updateResultsControls();
+    refreshDetailNavigation(detailPane);
   } catch (error) {
     if (thisSearch === searchSequence) {
       showQueryError(error.message);
@@ -350,7 +382,24 @@ async function loadOlder() {
   }
 }
 
+function detailNavigation() {
+  const currentIndex = Number(selectedRowElement.dataset.rowIndex);
+  return { hasPrevious: currentIndex > 0, hasNext: currentIndex < rows.length - 1 };
+}
+
+function navigateDetail(offset) {
+  const targetRowElement = resultsRows.children[Number(selectedRowElement.dataset.rowIndex) + offset];
+  if (targetRowElement) {
+    openRow(targetRowElement);
+    targetRowElement.scrollIntoView({ block: "nearest" });
+  }
+}
+
 function openRow(rowElement) {
+  if (detailHistoryState === "closed") {
+    history.pushState(detailHistoryMarker, "", location.href);
+    detailHistoryState = "open";
+  }
   if (selectedRowElement) {
     selectedRowElement.removeAttribute("aria-selected");
     selectedRowElement.classList.remove("selected");
@@ -366,6 +415,8 @@ function openRow(rowElement) {
       runSearch({ push: true });
     },
     onClose: closeDetail,
+    getNavigation: detailNavigation,
+    onNavigate: navigateDetail,
   });
 }
 
@@ -376,7 +427,7 @@ resultsRows.addEventListener("click", (clickEvent) => {
     return;
   }
   const rowElement = clickEvent.target.closest("tr");
-  if (rowElement) {
+  if (rowElement && resultsSection.getAttribute("aria-busy") !== "true") {
     openRow(rowElement);
   }
 });
@@ -462,18 +513,68 @@ exportMenu.addEventListener("click", (clickEvent) => {
   const formatName = clickEvent.target.closest("[data-export-format]")?.dataset.exportFormat;
   if (formatName) {
     downloadExport(formatName);
+    exportMenu.closest("dialog")?.close();
   }
 });
 
 loadOlderButton.addEventListener("click", loadOlder);
 
 window.addEventListener("popstate", () => {
+  if (detailHistoryState !== "closed" && location.search === renderedSearch) {
+    hideDetail();
+    return;
+  }
   readUrlState();
   runSearch({ push: false });
 });
 
-attachFacetAutocomplete(queryInput, document.getElementById("query-suggestions"), () => resolvedRange || resolveRange(), sourceParameters);
+attachFacetAutocomplete(queryInput, querySuggestions, () => resolvedRange || resolveRange(), sourceParameters);
 
 readUrlState();
 loadRestores();
+attachFiltersSheet(filtersButton, filtersPanel, exportMenu);
+attachPullToRefresh(() => runSearch({ push: false }), [tapeSection, detailPane, querySuggestions]);
+
+function setDetailDragOffset(offsetX, offsetY) {
+  detailPane.style.setProperty("--detail-drag-x", `${offsetX}px`);
+  detailPane.style.setProperty("--detail-drag-y", `${offsetY}px`);
+}
+
+function canDragDetail() {
+  return overlayMediaQuery.matches && detailHistoryState === "open";
+}
+
+function finishDetailDrag(distance) {
+  detailPane.classList.remove("dragging");
+  if (distance >= detailDismissDistance) {
+    closeDetail();
+  } else {
+    setDetailDragOffset(0, 0);
+  }
+}
+
+function cancelDetailDrag() {
+  detailPane.classList.remove("dragging");
+  setDetailDragOffset(0, 0);
+}
+
+trackHorizontalSwipe(detailPane, {
+  canStart: canDragDetail,
+  onMove: (distance) => {
+    detailPane.classList.add("dragging");
+    setDetailDragOffset(Math.max(distance, 0), 0);
+  },
+  onRelease: finishDetailDrag,
+  onCancel: cancelDetailDrag,
+});
+
+trackVerticalDrag(detailPane, {
+  canStart: () => canDragDetail() && detailPane.scrollTop <= 0,
+  onMove: (distance) => {
+    detailPane.classList.add("dragging");
+    setDetailDragOffset(0, distance);
+  },
+  onRelease: finishDetailDrag,
+  onCancel: cancelDetailDrag,
+});
 runSearch({ push: false });

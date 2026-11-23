@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in · scrapelog</title>
 {{template "head" .}}
 <script type="module" src="/assets/{{.AssetVersion}}/login.js"></script>
@@ -15,6 +14,7 @@
 <input id="login-username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
 <label for="login-password">Password</label>
 <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+<button type="button" id="login-password-toggle" class="password-toggle" aria-controls="login-password" aria-pressed="false">Show password</button>
 <p id="login-error" role="alert" hidden></p>
 <button type="submit">Sign in</button>
 </form>

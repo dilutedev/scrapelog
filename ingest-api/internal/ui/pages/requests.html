@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Requests · scrapelog</title>
 {{template "head" .}}
 <script type="module" src="/assets/{{.AssetVersion}}/requests.js"></script>
@@ -16,10 +15,15 @@
 <input id="query-input" name="q" type="text" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="query-suggestions" aria-autocomplete="list" placeholder="status:403 domain:shop.example.com">
 <ul id="query-suggestions" role="listbox" hidden></ul>
 </div>
+<button type="button" id="filters-button" class="filters-button" aria-haspopup="dialog">Filters</button>
+<div id="filters-panel" class="filters-panel">
+<div id="source-field" class="filter-field" hidden>
 <label for="source-select" class="visually-hidden">Source</label>
-<select id="source-select" hidden>
+<select id="source-select">
 <option value="">Live</option>
 </select>
+</div>
+<div class="filter-field">
 <label for="range-select" class="visually-hidden">Time range</label>
 <select id="range-select">
 <option value="15m">Last 15 minutes</option>
@@ -32,7 +36,7 @@
 <option value="60d">Last 60 days</option>
 <option value="custom" hidden>Custom range</option>
 </select>
-<button type="submit">Search</button>
+</div>
 <details class="export-menu">
 <summary>Download</summary>
 <div class="export-menu-panel">
@@ -41,6 +45,8 @@
 <p class="note">Newest 100,000 rows at most.</p>
 </div>
 </details>
+</div>
+<button type="submit">Search</button>
 </form>
 <p id="query-error" class="query-error" role="alert" hidden></p>
 <section class="tape" aria-label="Status share over time">

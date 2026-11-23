@@ -22,6 +22,13 @@ const usernameInput = document.getElementById("login-username");
 const passwordInput = document.getElementById("login-password");
 const errorMessage = document.getElementById("login-error");
 const submitButton = loginForm.querySelector("button[type=submit]");
+const passwordToggle = document.getElementById("login-password-toggle");
+
+passwordToggle.addEventListener("click", () => {
+  const passwordIsVisible = passwordInput.type === "text";
+  passwordInput.type = passwordIsVisible ? "password" : "text";
+  passwordToggle.setAttribute("aria-pressed", String(!passwordIsVisible));
+});
 
 loginForm.addEventListener("submit", async (submitEvent) => {
   submitEvent.preventDefault();

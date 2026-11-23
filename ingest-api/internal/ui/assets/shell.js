@@ -10,6 +10,27 @@ document.getElementById("sign-out").addEventListener("click", async () => {
   } catch {}
 });
 
+const accountMenu = document.querySelector(".account-menu");
+
+document.addEventListener("pointerdown", (pointerEvent) => {
+  if (accountMenu.open && !accountMenu.contains(pointerEvent.target)) {
+    accountMenu.open = false;
+  }
+});
+
+accountMenu.addEventListener("click", (clickEvent) => {
+  if (clickEvent.target.closest(".account-menu-panel a, .account-menu-panel button")) {
+    accountMenu.open = false;
+  }
+});
+
+document.addEventListener("keydown", (keyEvent) => {
+  if (keyEvent.key === "Escape" && accountMenu.open) {
+    accountMenu.open = false;
+    accountMenu.querySelector("summary").focus();
+  }
+});
+
 const grantedPermissions = document.querySelector(".topbar").dataset.permissions.split(" ");
 
 export function can(permission) {
