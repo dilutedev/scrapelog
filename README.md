@@ -251,7 +251,7 @@ Bytes (`response_size`) and responses over time from `requests_hourly`, so histo
 
 ### Alerts
 
-- A rule has a name, an optional project (empty means all), one or more conditions (all must match), a channel (Discord webhook, or Telegram bot token plus chat id) and a window from 10 to 3600 s (default 60).
+- A rule has a name, an optional project chosen from a list (names come from API keys; empty means all projects), one or more conditions (all must match), a channel (Discord webhook, or Telegram bot token plus chat id) and a window from 10 to 3600 s (default 60).
 
 | Field | Operators |
 | --- | --- |
@@ -270,6 +270,13 @@ Bytes (`response_size`) and responses over time from `requests_hourly`, so histo
 - The Test button sends a sample message.
 - Sent and failed deliveries are listed under the rule and kept 30 days (`alert_events`).
 - Secrets at rest: webhook URLs and bot tokens are stored in plain text in `scrapelog.alert_rules` and so are in every backup. The API never returns them and they are never logged. Keep the backup bucket private.
+
+### Projects and API keys
+
+- Only the admin sees the Projects page (`/projects`) and can use `GET` and `POST` on `/ui/api/keys` and `DELETE` on `/ui/api/keys/{key_id}`; every other signed-in account gets a 403. They are the session counterparts of the `/v1/admin/keys` routes.
+- A project exists once it has a key, so "New project" creates the project together with its first key. Project removal is not supported; revoke its keys instead.
+- The full key is shown once, right after it is created, and cannot be retrieved later. Copy it before dismissing the panel or leaving the page.
+- Revoking asks for confirmation. Revoked keys can keep working for up to 35 seconds on other instances because of the key cache.
 
 ### Users
 

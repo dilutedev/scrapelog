@@ -19,6 +19,7 @@ type fakeKeyStore struct {
 	createdProject string
 	createdName    string
 	createCalls    int
+	revokedKeyID   string
 	records        []apikeys.Record
 	err            error
 }
@@ -38,6 +39,7 @@ func (store *fakeKeyStore) List(ctx context.Context) ([]apikeys.Record, error) {
 }
 
 func (store *fakeKeyStore) Revoke(ctx context.Context, keyID string) error {
+	store.revokedKeyID = keyID
 	return store.err
 }
 

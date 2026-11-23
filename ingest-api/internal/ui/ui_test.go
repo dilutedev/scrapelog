@@ -187,6 +187,41 @@ func TestTopbarShowsUsersLinkOnlyToAdmin(t *testing.T) {
 	}
 }
 
+func TestTopbarShowsProjectsLinkOnlyToAdmin(t *testing.T) {
+	tests := map[string]struct {
+		viewer   Viewer
+		wantLink bool
+	}{
+		"admin":     {viewer: Viewer{IsAdmin: true}, wantLink: true},
+		"non-admin": {viewer: Viewer{Username: "alice", Permissions: users.AllPermissions}, wantLink: false},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			var rendered bytes.Buffer
+			if err := pageTemplates.ExecuteTemplate(&rendered, "topbar", pageData{AssetVersion: "v", Page: "projects", Viewer: test.viewer}); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			hasLink := strings.Contains(rendered.String(), `<a href="/projects" aria-current="page">Projects</a>`)
+			if hasLink != test.wantLink {
+				t.Fatalf("Projects link present = %v, want %v:\n%s", hasLink, test.wantLink, rendered.String())
+			}
+		})
+	}
+}
+
+func TestProjectsPageRendersFormAndPanel(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := pageTemplates.ExecuteTemplate(&rendered, "projects.html", pageData{AssetVersion: "v", Page: "projects", Viewer: Viewer{IsAdmin: true}}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	output := rendered.String()
+	for _, fragment := range []string{`/assets/v/projects.js`, `id="key-form"`, `id="new-key-panel"`, `id="project-list"`} {
+		if !strings.Contains(output, fragment) {
+			t.Errorf("output missing %q", fragment)
+		}
+	}
+}
+
 func TestUsersPageRendersFormAndEveryPermission(t *testing.T) {
 	var rendered bytes.Buffer
 	if err := pageTemplates.ExecuteTemplate(&rendered, "users.html", pageData{AssetVersion: "v", Page: "users", Viewer: Viewer{IsAdmin: true}}); err != nil {
@@ -290,8 +325,8 @@ func TestEveryPageIncludesHeadPartial(t *testing.T) {
 		}
 		pageNames = append(pageNames, entry.Name())
 	}
-	if len(pageNames) != 8 {
-		t.Fatalf("found %d pages %v, want 8", len(pageNames), pageNames)
+	if len(pageNames) != 9 {
+		t.Fatalf("found %d pages %v, want 9", len(pageNames), pageNames)
 	}
 	wantFragments := []string{
 		`href="/assets/v/manifest.json" crossorigin="use-credentials"`,

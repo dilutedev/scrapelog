@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projects · scrapelog</title>
+{{template "head" .}}
+<script type="module" src="/assets/{{.AssetVersion}}/projects.js"></script>
+</head>
+<body>
+{{template "topbar" .}}
+<main class="users">
+<div class="alerts-header">
+<h1>Projects</h1>
+<button type="button" id="add-project">New project</button>
+</div>
+<p id="projects-error" class="query-error" role="alert" hidden></p>
+<form id="key-form" class="rule-form" novalidate hidden>
+<h2 id="key-form-title">New project</h2>
+<label for="key-project">Project</label>
+<input id="key-project" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="64" required>
+<label for="key-name">Key name</label>
+<input id="key-name" autocomplete="off" maxlength="128" required>
+<p id="key-status" role="status"></p>
+<div class="editor-actions">
+<button type="submit" id="save-key">Create key</button>
+<button type="button" id="cancel-key">Cancel</button>
+</div>
+</form>
+<section id="new-key-panel" class="rule-form" hidden>
+<p>Copy this key now. It is shown only once and cannot be retrieved later.</p>
+<p id="new-key-note" role="status"></p>
+<code id="new-key-value"></code>
+<div class="editor-actions">
+<button type="button" id="copy-key">Copy</button>
+<button type="button" id="dismiss-key">Dismiss</button>
+</div>
+</section>
+<ul id="project-list" class="rule-list"></ul>
+<p id="projects-empty" class="empty-state" hidden>No projects yet. A project exists once it has a key: create one to let a scraper send requests.</p>
+</main>
+</body>
+</html>

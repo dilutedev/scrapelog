@@ -3,6 +3,7 @@ import { channelLabels, describeRule, fieldDefinitions, isExistenceOperator, ope
 
 const maximumConditions = 20;
 const rulesPath = "/ui/api/alert-rules";
+const projectsPath = "/ui/api/projects";
 
 const titleElement = document.getElementById("editor-title");
 const missingElement = document.getElementById("editor-missing");
@@ -168,6 +169,9 @@ function renderRule(rule) {
   titleElement.textContent = rule.name;
   document.title = `${rule.name} · Alerts · scrapelog`;
   nameInput.value = rule.name;
+  if (rule.project && !Array.from(projectInput.options).some((option) => option.value === rule.project)) {
+    projectInput.append(new Option(rule.project, rule.project));
+  }
   projectInput.value = rule.project;
   windowInput.value = rule.window_seconds;
   enabledCheckbox.checked = rule.enabled;
@@ -248,7 +252,17 @@ function showUnavailable(message) {
   missingElement.hidden = false;
 }
 
+async function loadProjects() {
+  try {
+    const projectNames = await apiFetch(projectsPath);
+    for (const projectName of projectNames) {
+      projectInput.append(new Option(projectName, projectName));
+    }
+  } catch {}
+}
+
 async function start() {
+  await loadProjects();
   let segment;
   try {
     segment = decodeURIComponent(location.pathname.slice("/alerts/".length));
