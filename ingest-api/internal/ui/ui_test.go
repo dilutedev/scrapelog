@@ -300,6 +300,29 @@ func TestUsersPageRendersFormAndEveryPermission(t *testing.T) {
 	}
 }
 
+func TestAlertEditKeepsDeleteRuleOutOfTheActionBar(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := pageTemplates.ExecuteTemplate(&rendered, "alert-edit.html", pageData{AssetVersion: "v", Page: "alert-edit", Viewer: Viewer{IsAdmin: true}}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	output := rendered.String()
+	actionBarStart := strings.Index(output, `<div class="editor-actions">`)
+	if actionBarStart < 0 {
+		t.Fatalf("output missing the editor-actions bar:\n%s", output)
+	}
+	actionBarEnd := actionBarStart + strings.Index(output[actionBarStart:], "</div>")
+	actionBar := output[actionBarStart:actionBarEnd]
+	for _, fragment := range []string{`id="send-test"`, `id="save-rule"`} {
+		if !strings.Contains(actionBar, fragment) {
+			t.Errorf("action bar missing %q", fragment)
+		}
+	}
+	deleteIndex := strings.Index(output, `id="delete-rule"`)
+	if deleteIndex < actionBarEnd {
+		t.Fatalf("delete-rule must sit after the action bar, found at %d, bar ends at %d", deleteIndex, actionBarEnd)
+	}
+}
+
 func TestManifestIsServedWithRequiredFields(t *testing.T) {
 	recorder := serveAsset("/assets/" + assetVersion + "/manifest.json")
 	if recorder.Code != http.StatusOK {

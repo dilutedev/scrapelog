@@ -1826,6 +1826,10 @@ select {
   gap: 0.75rem;
 }
 
+#delete-rule {
+  align-self: flex-start;
+}
+
 #rule-window {
   box-sizing: content-box;
   width: 6ch;
@@ -1878,15 +1882,57 @@ select {
     padding: var(--space-4);
   }
 
+  .alert-edit .rule-form {
+    padding: 0;
+    background: none;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .alert-edit .rule-form fieldset {
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+
+  .alert-edit .rule-form input[type="checkbox"],
+  .alert-edit .rule-form input[type="radio"] {
+    flex: 0 0 auto;
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+
+  .alert-edit .rule-form > label:has(> input[type="checkbox"]) {
+    min-height: 44px;
+  }
+
+  .alert-edit .window-line {
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+
+  #rule-window {
+    width: 5ch;
+  }
+
   .alert-edit .editor-actions {
     position: sticky;
     bottom: calc(var(--tab-bar-height) + env(safe-area-inset-bottom));
     z-index: 2;
     margin: 0 calc(-1 * var(--space-4));
-    padding: var(--space-3) var(--space-4);
+    padding: var(--space-2) var(--space-4);
     background: var(--sheet);
     border-top: 1px solid var(--rule-soft);
     box-shadow: var(--shadow-2);
+  }
+
+  body:has(:is(input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]), select, textarea):focus) .alert-edit .editor-actions {
+    bottom: 0;
+    padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom));
+  }
+
+  html:has(.alert-edit) {
+    scroll-padding-bottom: calc(var(--tab-bar-height) + 5rem);
   }
 
   .editor-actions > button {
