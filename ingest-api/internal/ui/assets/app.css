@@ -1766,6 +1766,14 @@ select {
   color: var(--graphite);
 }
 
+.rule-content {
+  display: contents;
+}
+
+.rule-actions {
+  display: none;
+}
+
 .event-summary {
   margin: 0;
 }
@@ -1980,6 +1988,68 @@ select {
     content: "";
     position: absolute;
     inset: 0;
+  }
+
+  .alerts {
+    --rule-actions-width: 11rem;
+  }
+
+  .alerts .rule-list {
+    overflow: hidden;
+  }
+
+  .alerts .rule-list li {
+    display: block;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .alerts .rule-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.25rem 1rem;
+    padding: var(--space-3) var(--space-4);
+    background: var(--sheet);
+    position: relative;
+    z-index: 1;
+    touch-action: pan-y;
+    transform: translateX(var(--rule-swipe-x, 0px));
+    transition: transform 150ms ease-out;
+  }
+
+  .alerts .rule-list li.swipe-open {
+    --rule-swipe-x: calc(-1 * var(--rule-actions-width));
+  }
+
+  .alerts .rule-list li.swipe-dragging .rule-content {
+    transition: none;
+  }
+
+  .alerts .rule-actions {
+    display: flex;
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: var(--rule-actions-width);
+    visibility: hidden;
+    transition: visibility 0s linear 150ms;
+  }
+
+  .alerts .rule-list li.swipe-open .rule-actions,
+  .alerts .rule-list li.swipe-dragging .rule-actions {
+    visibility: visible;
+    transition-delay: 0s;
+  }
+
+  .alerts .rule-actions button {
+    flex: 1 1 0;
+    min-height: 44px;
+    border: 0;
+    border-radius: 0;
+    background: var(--sunken);
+    outline-offset: -3px;
   }
 
   .event-list summary {
@@ -2264,5 +2334,12 @@ html.pull-to-refresh {
 
   .pull-indicator.refreshing::after {
     animation: none;
+  }
+}
+
+@media (max-width: 759px) and (prefers-reduced-motion: reduce) {
+  .alerts .rule-content,
+  .alerts .rule-actions {
+    transition: none;
   }
 }
