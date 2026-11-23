@@ -1,4 +1,5 @@
 import { apiFetch } from "./shell.js";
+import { confirmSheet } from "./sheet.js";
 
 const permissionLabels = {
   view_requests: "View requests",
@@ -133,6 +134,18 @@ async function submitForm(event) {
     path += "/" + encodeURIComponent(editingUserId);
     method = "PUT";
     body = { permissions, password: passwordInput.value, disabled: disabledInput.checked };
+    const editedUser = usersById.get(editingUserId);
+    const signsUserOut = (disabledInput.checked && !editedUser.disabled) || passwordInput.value !== "";
+    if (signsUserOut) {
+      const confirmed = await confirmSheet({
+        message: `Saving these changes signs ${editedUser.username} out. Continue?`,
+        confirmLabel: "Save and sign out",
+        destructive: false,
+      });
+      if (!confirmed) {
+        return;
+      }
+    }
   }
   saveButton.disabled = true;
   statusElement.textContent = "";
