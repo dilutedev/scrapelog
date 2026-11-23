@@ -59,6 +59,7 @@ var navigationEntries = []navigationEntry{
 	{Path: "/alerts", Label: "Alerts", Pages: []string{"alerts", "alert-edit"}, AnyOf: []string{"view_alerts", "manage_alerts"}},
 	{Path: "/archive", Label: "Archive", Pages: []string{"archive"}, AnyOf: []string{"view_archives", "estimate_restores", "manage_restores"}},
 	{Path: "/users", Label: "Users", Pages: []string{"users"}, AdminOnly: true},
+	{Path: "/projects", Label: "Projects", Pages: []string{"projects"}, AdminOnly: true},
 }
 
 type pageData struct {

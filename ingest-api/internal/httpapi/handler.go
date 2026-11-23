@@ -66,12 +66,16 @@ func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse
 	router.HandleFunc("GET /ui/api/users", withSecurityHeaders(requirePermission(sessionSigner, userDirectory, []string{}, listUsersHandler(logger, userDirectory))))
 	router.HandleFunc("POST /ui/api/users", withSecurityHeaders(requirePermission(sessionSigner, userDirectory, []string{}, requireSameOriginJSON(createUserHandler(logger, userDirectory)))))
 	router.HandleFunc("PUT /ui/api/users/{user_id}", withSecurityHeaders(requirePermission(sessionSigner, userDirectory, []string{}, requireSameOriginJSON(updateUserHandler(logger, userDirectory)))))
+	router.HandleFunc("GET /ui/api/keys", withSecurityHeaders(requirePermission(sessionSigner, userDirectory, []string{}, listKeysHandler(logger, keyStore))))
+	router.HandleFunc("POST /ui/api/keys", withSecurityHeaders(requirePermission(sessionSigner, userDirectory, []string{}, requireSameOriginJSON(withNoStore(createKeyHandler(logger, keyStore, keyCache))))))
+	router.HandleFunc("DELETE /ui/api/keys/{key_id}", withSecurityHeaders(requirePermission(sessionSigner, userDirectory, []string{}, requireSameOriginJSON(revokeKeyHandler(logger, keyStore, keyCache)))))
 	router.HandleFunc("GET /bandwidth", withSecurityHeaders(requirePagePermission(sessionSigner, userDirectory, []string{users.ViewBandwidth}, ui.PageHandler(logger, "bandwidth"))))
 	router.HandleFunc("GET /alerts", withSecurityHeaders(requirePagePermission(sessionSigner, userDirectory, []string{users.ViewAlerts, users.ManageAlerts}, ui.PageHandler(logger, "alerts"))))
 	router.HandleFunc("GET /alerts/{rule_id}", withSecurityHeaders(requirePagePermission(sessionSigner, userDirectory, []string{users.ManageAlerts}, ui.PageHandler(logger, "alert-edit"))))
 	router.HandleFunc("GET /archive", withSecurityHeaders(requirePagePermission(sessionSigner, userDirectory, []string{users.ViewArchives, users.EstimateRestores, users.ManageRestores}, ui.PageHandler(logger, "archive"))))
 	router.HandleFunc("GET /requests", withSecurityHeaders(requirePagePermission(sessionSigner, userDirectory, []string{users.ViewRequests}, ui.PageHandler(logger, "requests"))))
 	router.HandleFunc("GET /users", withSecurityHeaders(requirePagePermission(sessionSigner, userDirectory, []string{}, ui.PageHandler(logger, "users"))))
+	router.HandleFunc("GET /projects", withSecurityHeaders(requirePagePermission(sessionSigner, userDirectory, []string{}, ui.PageHandler(logger, "projects"))))
 	router.HandleFunc("GET /assets/", withSecurityHeaders(ui.AssetHandler()))
 	return router
 }

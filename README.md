@@ -271,6 +271,13 @@ Bytes (`response_size`) and responses over time from `requests_hourly`, so histo
 - Sent and failed deliveries are listed under the rule and kept 30 days (`alert_events`).
 - Secrets at rest: webhook URLs and bot tokens are stored in plain text in `scrapelog.alert_rules` and so are in every backup. The API never returns them and they are never logged. Keep the backup bucket private.
 
+### Projects and API keys
+
+- Only the admin sees the Projects page (`/projects`) and can use `GET` and `POST` on `/ui/api/keys` and `DELETE` on `/ui/api/keys/{key_id}`; every other signed-in account gets a 403. They are the session counterparts of the `/v1/admin/keys` routes.
+- A project exists once it has a key, so "New project" creates the project together with its first key. Project removal is not supported; revoke its keys instead.
+- The full key is shown once, right after it is created, and cannot be retrieved later. Copy it before dismissing the panel or leaving the page.
+- Revoking asks for confirmation. Revoked keys can keep working for up to 35 seconds on other instances because of the key cache.
+
 ### Users
 
 - Only the admin sees the Users page (`/users`) and can use `GET`, `POST` and `PUT` on `/ui/api/users`; every other signed-in account gets a 403.
