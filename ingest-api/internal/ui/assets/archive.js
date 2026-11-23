@@ -1,4 +1,5 @@
 import { apiFetch, can, formatBytes } from "./shell.js";
+import { confirmSheet } from "./sheet.js";
 
 const pollIntervalMilliseconds = 3000;
 
@@ -85,7 +86,11 @@ function restoreStatusText(restore) {
 }
 
 async function deleteRestore(restore) {
-  if (!confirm(`Delete the restore for ${restoreLabel(restore)}? Its restored rows are dropped.`)) {
+  const confirmed = await confirmSheet({
+    message: `Delete the restore for ${restoreLabel(restore)}? Its restored rows are dropped.`,
+    confirmLabel: "Delete restore",
+  });
+  if (!confirmed) {
     return;
   }
   try {
@@ -101,17 +106,18 @@ function renderRestore(restore) {
   const text = document.createElement("span");
   text.textContent = `${restoreLabel(restore)} · ${restoreStatusText(restore)}`;
   const actions = document.createElement("span");
+  actions.className = "restore-actions";
   if (restore.status === "ready" && can("view_requests")) {
     const browse = document.createElement("a");
     browse.className = "action-button";
     browse.href = "/requests?" + new URLSearchParams({ restore_id: restore.restore_id, from: restore.from, to: restore.to });
     browse.textContent = "Browse";
-    actions.append(browse, " ");
+    actions.append(browse);
   }
   if (can("manage_restores")) {
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
-    deleteButton.className = "action-button";
+    deleteButton.className = "danger-button";
     deleteButton.textContent = "Delete";
     deleteButton.addEventListener("click", () => deleteRestore(restore));
     actions.append(deleteButton);

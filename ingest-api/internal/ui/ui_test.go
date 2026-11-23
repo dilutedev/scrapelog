@@ -145,6 +145,32 @@ func TestScriptsUseNoHTMLSinks(t *testing.T) {
 	}
 }
 
+func TestScriptsDoNotUseNativeConfirm(t *testing.T) {
+	nativeConfirm := regexp.MustCompile(`(^|[^A-Za-z_.])confirm\(`)
+	walkError := fs.WalkDir(embeddedFiles, "assets", func(filePath string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() && filePath == "assets/vendor" {
+			return fs.SkipDir
+		}
+		if entry.IsDir() || path.Ext(filePath) != ".js" {
+			return nil
+		}
+		content, readErr := fs.ReadFile(embeddedFiles, filePath)
+		if readErr != nil {
+			return readErr
+		}
+		if nativeConfirm.Match(content) {
+			t.Errorf("%s calls the native confirm()", filePath)
+		}
+		return nil
+	})
+	if walkError != nil {
+		t.Fatalf("unexpected error: %v", walkError)
+	}
+}
+
 func TestVendoredUPlotIsServed(t *testing.T) {
 	tests := map[string]string{
 		"uPlot.esm.js":  "javascript",

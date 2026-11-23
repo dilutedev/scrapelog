@@ -1,4 +1,5 @@
 import { apiFetch } from "./shell.js";
+import { confirmSheet } from "./sheet.js";
 import { channelLabels, describeRule, fieldDefinitions, isExistenceOperator, operatorLabels, valuePlaceholders } from "./alert-rules.js";
 
 const maximumConditions = 20;
@@ -234,7 +235,11 @@ async function sendTest() {
 }
 
 async function deleteRule() {
-  if (!confirm(`Delete rule "${savedRule.name}"? This can't be undone.`)) {
+  const confirmed = await confirmSheet({
+    message: `Delete rule "${savedRule.name}"? This can't be undone.`,
+    confirmLabel: "Delete rule",
+  });
+  if (!confirmed) {
     return;
   }
   try {

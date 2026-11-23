@@ -1860,6 +1860,14 @@ select {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .restore-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    column-gap: 2.75rem;
+    row-gap: var(--space-3);
+  }
+
   .alert-edit > p:first-child a {
     display: inline-flex;
     align-items: center;
@@ -1900,4 +1908,93 @@ select {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.danger-button {
+  color: var(--status-5xx);
+  border-color: var(--status-5xx);
+}
+
+dialog.sheet {
+  box-sizing: border-box;
+  padding: 0;
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius-m);
+  background: var(--sheet);
+  color: var(--ink);
+  box-shadow: var(--shadow-2);
+  width: min(28rem, calc(100vw - 2 * var(--space-4)));
+  max-height: calc(100dvh - 2 * var(--space-4));
+  overflow-y: auto;
+}
+
+dialog.sheet::backdrop {
+  background: color-mix(in srgb, var(--ink) 45%, transparent);
+}
+
+.sheet-body {
+  padding: var(--space-5);
+}
+
+.sheet-message {
+  margin: 0 0 var(--space-5);
+  font-size: var(--size-large);
+  overflow-wrap: anywhere;
+}
+
+.sheet-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+.sheet-actions button[value="cancel"] {
+  background: var(--sheet);
+  color: var(--ink);
+  border-color: var(--rule-soft);
+}
+
+.sheet .danger-button {
+  background: var(--status-5xx);
+  border-color: var(--status-5xx);
+  color: var(--paper);
+}
+
+@keyframes sheet-rise {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@media (max-width: 759px) {
+  dialog.sheet {
+    inset: auto 0 0 0;
+    margin: 0;
+    width: 100%;
+    max-width: none;
+    border-width: 1px 0 0;
+    border-radius: var(--radius-m) var(--radius-m) 0 0;
+  }
+
+  dialog.sheet[open] {
+    animation: sheet-rise 200ms ease-out;
+  }
+
+  .sheet-body {
+    padding: var(--space-5) calc(var(--space-4) + env(safe-area-inset-right)) calc(var(--space-4) + env(safe-area-inset-bottom)) calc(var(--space-4) + env(safe-area-inset-left));
+  }
+
+  .sheet-actions {
+    flex-direction: column-reverse;
+  }
+
+  .sheet-actions button {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  dialog.sheet[open] {
+    animation: none;
+  }
 }
