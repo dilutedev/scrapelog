@@ -2007,6 +2007,18 @@ dialog.sheet::backdrop {
   overflow-wrap: anywhere;
 }
 
+.sheet-handle {
+  display: none;
+}
+
+dialog.sheet {
+  transition: transform 150ms ease-out;
+}
+
+dialog.sheet.sheet-dragging {
+  transition: none;
+}
+
 .sheet-actions {
   display: flex;
   justify-content: flex-end;
@@ -2045,6 +2057,21 @@ dialog.sheet::backdrop {
     animation: sheet-rise 200ms ease-out;
   }
 
+  .sheet-handle {
+    display: flex;
+    justify-content: center;
+    padding: var(--space-3) 0 var(--space-2);
+    touch-action: none;
+  }
+
+  .sheet-handle::before {
+    content: "";
+    width: 2.5rem;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--rule);
+  }
+
   .sheet-body {
     padding: var(--space-5) calc(var(--space-4) + env(safe-area-inset-right)) calc(var(--space-4) + env(safe-area-inset-bottom)) calc(var(--space-4) + env(safe-area-inset-left));
   }
@@ -2061,6 +2088,10 @@ dialog.sheet::backdrop {
 @media (prefers-reduced-motion: reduce) {
   dialog.sheet[open] {
     animation: none;
+  }
+
+  dialog.sheet {
+    transition: none;
   }
 }
 
