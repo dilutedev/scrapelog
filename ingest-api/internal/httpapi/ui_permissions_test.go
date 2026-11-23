@@ -39,6 +39,7 @@ var permissionMatrix = []permissionRoute{
 	{pattern: "DELETE /ui/api/alert-rules/{rule_id}", anyOf: []string{users.ManageAlerts}},
 	{pattern: "POST /ui/api/alert-rules/{rule_id}/test", anyOf: []string{users.ManageAlerts}},
 	{pattern: "GET /ui/api/alert-events", anyOf: []string{users.ViewAlerts, users.ManageAlerts}},
+	{pattern: "GET /ui/api/projects", anyOf: []string{users.ManageAlerts}},
 	{pattern: "GET /ui/api/archives", anyOf: []string{users.ViewArchives}},
 	{pattern: "GET /ui/api/archives/{day}/download", anyOf: []string{users.ViewArchives}},
 	{pattern: "GET /ui/api/restores/estimate", anyOf: []string{users.EstimateRestores, users.ManageRestores}},

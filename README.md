@@ -251,7 +251,7 @@ Bytes (`response_size`) and responses over time from `requests_hourly`, so histo
 
 ### Alerts
 
-- A rule has a name, an optional project (empty means all), one or more conditions (all must match), a channel (Discord webhook, or Telegram bot token plus chat id) and a window from 10 to 3600 s (default 60).
+- A rule has a name, an optional project chosen from a list (names come from API keys; empty means all projects), one or more conditions (all must match), a channel (Discord webhook, or Telegram bot token plus chat id) and a window from 10 to 3600 s (default 60).
 
 | Field | Operators |
 | --- | --- |
