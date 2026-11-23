@@ -514,6 +514,14 @@ select {
   width: 100%;
 }
 
+.login .password-toggle {
+  width: auto;
+  align-self: flex-start;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
 .forbidden {
   border-style: dashed;
   text-align: left;

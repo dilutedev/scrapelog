@@ -437,6 +437,25 @@ func TestEveryPageIncludesHeadPartial(t *testing.T) {
 	}
 }
 
+func TestLoginHasShowPasswordToggle(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := pageTemplates.ExecuteTemplate(&rendered, "login.html", pageData{AssetVersion: "v"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{`id="login-password-toggle"`, `aria-controls="login-password"`, `aria-pressed="false"`, `type="button"`} {
+		if !strings.Contains(rendered.String(), want) {
+			t.Fatalf("login page missing %q", want)
+		}
+	}
+	script, err := fs.ReadFile(embeddedFiles, "assets/login.js")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(string(script), "login-password-toggle") {
+		t.Fatal("login.js does not wire the password toggle")
+	}
+}
+
 func TestBrandMarkAppearsInTopbarAndLogin(t *testing.T) {
 	for _, templateName := range []string{"topbar", "login.html"} {
 		t.Run(templateName, func(t *testing.T) {
