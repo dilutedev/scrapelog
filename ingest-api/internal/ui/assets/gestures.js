@@ -1,4 +1,5 @@
 const axisLockDistance = 10;
+const edgeDeadZone = 20;
 const pullResistance = 0.5;
 const refreshOffset = 64;
 const maximumOffset = 96;
@@ -67,6 +68,60 @@ export function trackVerticalDrag(element, { canStart, onMove, onRelease, onCanc
       onCancel();
     }
     dragState = "idle";
+  });
+}
+
+export function trackHorizontalSwipe(element, { canStart, onMove, onRelease, onCancel }) {
+  let swipeState = "idle";
+  let activePointerId = 0;
+  let startX = 0;
+  let startY = 0;
+  let lastDistance = 0;
+
+  element.addEventListener("pointerdown", (pointerEvent) => {
+    if (pointerEvent.pointerType !== "touch" || !pointerEvent.isPrimary
+      || pointerEvent.clientX < edgeDeadZone || !canStart(pointerEvent)) {
+      return;
+    }
+    activePointerId = pointerEvent.pointerId;
+    startX = pointerEvent.clientX;
+    startY = pointerEvent.clientY;
+    lastDistance = 0;
+    swipeState = "deciding";
+  });
+
+  element.addEventListener("pointermove", (pointerEvent) => {
+    if (swipeState === "idle" || pointerEvent.pointerId !== activePointerId) {
+      return;
+    }
+    const horizontalTravel = pointerEvent.clientX - startX;
+    const verticalTravel = pointerEvent.clientY - startY;
+    if (swipeState === "deciding") {
+      if (Math.hypot(horizontalTravel, verticalTravel) < axisLockDistance) {
+        return;
+      }
+      if (Math.abs(horizontalTravel) <= Math.abs(verticalTravel)) {
+        swipeState = "idle";
+        return;
+      }
+      swipeState = "dragging";
+    }
+    lastDistance = horizontalTravel;
+    onMove(lastDistance);
+  });
+
+  element.addEventListener("pointerup", (pointerEvent) => {
+    if (swipeState === "dragging" && pointerEvent.pointerId === activePointerId) {
+      onRelease(lastDistance);
+    }
+    swipeState = "idle";
+  });
+
+  element.addEventListener("pointercancel", () => {
+    if (swipeState === "dragging") {
+      onCancel();
+    }
+    swipeState = "idle";
   });
 }
 

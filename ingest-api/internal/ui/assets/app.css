@@ -1582,14 +1582,31 @@ select {
     border: 0;
     border-radius: 0;
     box-shadow: none;
+    touch-action: pan-y;
+    transform: translate(var(--detail-drag-x, 0px), var(--detail-drag-y, 0px));
+    transition: transform 150ms ease-out;
+    padding-top: calc(var(--space-4) + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+    padding-left: calc(var(--space-5) + env(safe-area-inset-left, 0px));
+    padding-right: calc(var(--space-5) + env(safe-area-inset-right, 0px));
+  }
+
+  .detail-pane.dragging {
+    transition: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .detail-pane {
+      transition: none;
+    }
   }
 
   .detail-header {
     position: sticky;
-    top: calc(-1 * var(--space-4));
+    top: calc(-1 * (var(--space-4) + env(safe-area-inset-top, 0px)));
     z-index: 1;
-    margin: calc(-1 * var(--space-4)) calc(-1 * var(--space-5)) var(--space-3);
-    padding: var(--space-2) var(--space-5);
+    margin: calc(-1 * (var(--space-4) + env(safe-area-inset-top, 0px))) calc(-1 * (var(--space-5) + env(safe-area-inset-right, 0px))) var(--space-3) calc(-1 * (var(--space-5) + env(safe-area-inset-left, 0px)));
+    padding: calc(var(--space-2) + env(safe-area-inset-top, 0px)) calc(var(--space-5) + env(safe-area-inset-right, 0px)) var(--space-2) calc(var(--space-5) + env(safe-area-inset-left, 0px));
     background: var(--sheet);
     border-bottom: 1px solid var(--rule-soft);
   }

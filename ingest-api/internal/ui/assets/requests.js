@@ -2,13 +2,15 @@ import { apiFetch, networkErrorMessage } from "./shell.js";
 import { addQueryTerm, attachFacetAutocomplete, canFilter, formatQueryTerm } from "./requests-query.js";
 import { renderTape } from "./requests-tape.js";
 import { refreshDetailNavigation, showRequestDetail } from "./requests-detail.js";
-import { attachPullToRefresh } from "./gestures.js";
+import { attachPullToRefresh, trackHorizontalSwipe, trackVerticalDrag } from "./gestures.js";
 import { attachFiltersSheet } from "./requests-filters.js";
 
 const presetSeconds = { "15m": 900, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "14d": 1209600, "30d": 2592000, "60d": 5184000 };
 const defaultPreset = "1h";
 const pathTailLength = 24;
 const detailHistoryMarker = { requestDetail: true };
+const detailDismissDistance = 96;
+const overlayMediaQuery = window.matchMedia("(max-width: 1023px)");
 
 const queryForm = document.getElementById("query-form");
 const exportMenu = document.querySelector(".export-menu");
@@ -251,6 +253,8 @@ function resetDetailSelection() {
   explorerBody.classList.remove("pane-open");
   selectedRowElement = null;
   detailHistoryState = "closed";
+  detailPane.classList.remove("dragging");
+  setDetailDragOffset(0, 0);
 }
 
 function closeDetail() {
@@ -530,4 +534,47 @@ readUrlState();
 loadRestores();
 attachFiltersSheet(filtersButton, filtersPanel, exportMenu);
 attachPullToRefresh(() => runSearch({ push: false }), [tapeSection, detailPane, querySuggestions]);
+
+function setDetailDragOffset(offsetX, offsetY) {
+  detailPane.style.setProperty("--detail-drag-x", `${offsetX}px`);
+  detailPane.style.setProperty("--detail-drag-y", `${offsetY}px`);
+}
+
+function canDragDetail() {
+  return overlayMediaQuery.matches && detailHistoryState === "open";
+}
+
+function finishDetailDrag(distance) {
+  detailPane.classList.remove("dragging");
+  if (distance >= detailDismissDistance) {
+    closeDetail();
+  } else {
+    setDetailDragOffset(0, 0);
+  }
+}
+
+function cancelDetailDrag() {
+  detailPane.classList.remove("dragging");
+  setDetailDragOffset(0, 0);
+}
+
+trackHorizontalSwipe(detailPane, {
+  canStart: canDragDetail,
+  onMove: (distance) => {
+    detailPane.classList.add("dragging");
+    setDetailDragOffset(Math.max(distance, 0), 0);
+  },
+  onRelease: finishDetailDrag,
+  onCancel: cancelDetailDrag,
+});
+
+trackVerticalDrag(detailPane, {
+  canStart: () => canDragDetail() && detailPane.scrollTop <= 0,
+  onMove: (distance) => {
+    detailPane.classList.add("dragging");
+    setDetailDragOffset(0, distance);
+  },
+  onRelease: finishDetailDrag,
+  onCancel: cancelDetailDrag,
+});
 runSearch({ push: false });
