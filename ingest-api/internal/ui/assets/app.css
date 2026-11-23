@@ -2052,6 +2052,21 @@ select {
     outline-offset: -3px;
   }
 
+  .alerts-header a.action-button {
+    position: fixed;
+    z-index: 3;
+    right: calc(var(--space-4) + env(safe-area-inset-right));
+    bottom: calc(var(--tab-bar-height) + env(safe-area-inset-bottom) + var(--space-4));
+    min-height: 3rem;
+    padding: 0 var(--space-5);
+    border-radius: var(--radius-pill);
+    box-shadow: var(--shadow-2);
+  }
+
+  .alerts:has(.alerts-header a.action-button) {
+    padding-bottom: calc(var(--space-4) + 3rem + var(--space-4));
+  }
+
   .event-list summary {
     min-height: 44px;
     display: flex;
