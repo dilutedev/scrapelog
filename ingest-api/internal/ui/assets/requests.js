@@ -1,13 +1,14 @@
 import { apiFetch, networkErrorMessage } from "./shell.js";
 import { addQueryTerm, attachFacetAutocomplete, canFilter, formatQueryTerm } from "./requests-query.js";
 import { renderTape } from "./requests-tape.js";
-import { showRequestDetail } from "./requests-detail.js";
+import { refreshDetailNavigation, showRequestDetail } from "./requests-detail.js";
 import { attachPullToRefresh } from "./gestures.js";
 import { attachFiltersSheet } from "./requests-filters.js";
 
 const presetSeconds = { "15m": 900, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800, "14d": 1209600, "30d": 2592000, "60d": 5184000 };
 const defaultPreset = "1h";
 const pathTailLength = 24;
+const detailHistoryMarker = { requestDetail: true };
 
 const queryForm = document.getElementById("query-form");
 const exportMenu = document.querySelector(".export-menu");
@@ -42,6 +43,8 @@ let nextCursor = null;
 let rows = [];
 let searchSequence = 0;
 let selectedRowElement = null;
+let detailHistoryState = "closed";
+let renderedSearch = "";
 
 const timeFormatter = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 
@@ -133,7 +136,8 @@ function writeUrlState(push) {
     urlParameters.set("to", rangeSelection.to.toISOString());
   }
   const newSearch = "?" + urlParameters.toString();
-  if (push && newSearch !== location.search) {
+  renderedSearch = newSearch;
+  if (push && newSearch !== location.search && detailHistoryState === "closed") {
     history.pushState(null, "", location.pathname + newSearch);
   } else {
     history.replaceState(null, "", location.pathname + newSearch);
@@ -246,9 +250,17 @@ function resetDetailSelection() {
   detailPane.replaceChildren();
   explorerBody.classList.remove("pane-open");
   selectedRowElement = null;
+  detailHistoryState = "closed";
 }
 
 function closeDetail() {
+  if (detailHistoryState === "open") {
+    detailHistoryState = "closing";
+    history.back();
+  }
+}
+
+function hideDetail() {
   const closedRowElement = selectedRowElement;
   resetDetailSelection();
   if (closedRowElement) {
@@ -354,6 +366,7 @@ async function loadOlder() {
     }
     nextCursor = page.next_cursor;
     updateResultsControls();
+    refreshDetailNavigation(detailPane);
   } catch (error) {
     if (thisSearch === searchSequence) {
       showQueryError(error.message);
@@ -365,7 +378,24 @@ async function loadOlder() {
   }
 }
 
+function detailNavigation() {
+  const currentIndex = Number(selectedRowElement.dataset.rowIndex);
+  return { hasPrevious: currentIndex > 0, hasNext: currentIndex < rows.length - 1 };
+}
+
+function navigateDetail(offset) {
+  const targetRowElement = resultsRows.children[Number(selectedRowElement.dataset.rowIndex) + offset];
+  if (targetRowElement) {
+    openRow(targetRowElement);
+    targetRowElement.scrollIntoView({ block: "nearest" });
+  }
+}
+
 function openRow(rowElement) {
+  if (detailHistoryState === "closed") {
+    history.pushState(detailHistoryMarker, "", location.href);
+    detailHistoryState = "open";
+  }
   if (selectedRowElement) {
     selectedRowElement.removeAttribute("aria-selected");
     selectedRowElement.classList.remove("selected");
@@ -381,6 +411,8 @@ function openRow(rowElement) {
       runSearch({ push: true });
     },
     onClose: closeDetail,
+    getNavigation: detailNavigation,
+    onNavigate: navigateDetail,
   });
 }
 
@@ -391,7 +423,7 @@ resultsRows.addEventListener("click", (clickEvent) => {
     return;
   }
   const rowElement = clickEvent.target.closest("tr");
-  if (rowElement) {
+  if (rowElement && resultsSection.getAttribute("aria-busy") !== "true") {
     openRow(rowElement);
   }
 });
@@ -484,6 +516,10 @@ exportMenu.addEventListener("click", (clickEvent) => {
 loadOlderButton.addEventListener("click", loadOlder);
 
 window.addEventListener("popstate", () => {
+  if (detailHistoryState !== "closed" && location.search === renderedSearch) {
+    hideDetail();
+    return;
+  }
   readUrlState();
   runSearch({ push: false });
 });
