@@ -405,8 +405,8 @@ func TestEveryPageIncludesHeadPartial(t *testing.T) {
 		}
 		pageNames = append(pageNames, entry.Name())
 	}
-	if len(pageNames) != 9 {
-		t.Fatalf("found %d pages %v, want 9", len(pageNames), pageNames)
+	if len(pageNames) != 10 {
+		t.Fatalf("found %d pages %v, want 10", len(pageNames), pageNames)
 	}
 	wantFragments := []string{
 		`href="/assets/v/manifest.json" crossorigin="use-credentials"`,

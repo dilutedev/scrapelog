@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dilutedev/scrapelog/ingest-api/internal/config"
@@ -77,7 +78,34 @@ func NewHandler(shutdownContext context.Context, logger *slog.Logger, clickHouse
 	router.HandleFunc("GET /users", withSecurityHeaders(requirePagePermission(sessionSigner, userDirectory, []string{}, ui.PageHandler(logger, "users"))))
 	router.HandleFunc("GET /projects", withSecurityHeaders(requirePagePermission(sessionSigner, userDirectory, []string{}, ui.PageHandler(logger, "projects"))))
 	router.HandleFunc("GET /assets/", withSecurityHeaders(ui.AssetHandler()))
-	return router
+	return withStyledNotFound(router)
+}
+
+func withStyledNotFound(router *http.ServeMux) http.Handler {
+	styledNotFound := withSecurityHeaders(func(responseWriter http.ResponseWriter, request *http.Request) {
+		ui.WriteNotFound(responseWriter)
+	})
+	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		if isPageRequest(request) {
+			if _, matchedPattern := router.Handler(request); matchedPattern == "" {
+				styledNotFound(responseWriter, request)
+				return
+			}
+		}
+		router.ServeHTTP(responseWriter, request)
+	})
+}
+
+func isPageRequest(request *http.Request) bool {
+	if request.Method != http.MethodGet && request.Method != http.MethodHead {
+		return false
+	}
+	for _, apiPrefix := range []string{"/v1/", "/ui/api/", "/assets/"} {
+		if strings.HasPrefix(request.URL.Path, apiPrefix) {
+			return false
+		}
+	}
+	return true
 }
 
 func healthHandler(logger *slog.Logger, clickHouse ClickHousePinger) http.HandlerFunc {

@@ -529,6 +529,17 @@ select {
   align-self: flex-start;
 }
 
+@media (max-width: 759px) {
+  .login {
+    margin: var(--space-5) auto;
+    padding: var(--space-5);
+  }
+
+  .forbidden .action-button {
+    align-self: stretch;
+  }
+}
+
 .empty-state {
   margin: var(--space-4) 0;
   padding: var(--space-6);

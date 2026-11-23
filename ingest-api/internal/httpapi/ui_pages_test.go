@@ -44,12 +44,81 @@ func TestLoginPageRendersWithoutSession(t *testing.T) {
 	}
 }
 
-func TestUnknownPathReturnsNotFound(t *testing.T) {
-	for _, target := range []string{"/nope", "/assets/nope"} {
-		t.Run(target, func(t *testing.T) {
-			recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, target, ""))
+func TestUnmatchedPageRequestsServeStyledNotFound(t *testing.T) {
+	cases := map[string]struct {
+		method string
+		target string
+		cookie string
+	}{
+		"get signed out":  {http.MethodGet, "/nope", ""},
+		"head signed out": {http.MethodHead, "/nope", ""},
+		"get signed in":   {http.MethodGet, "/nope", adminSession()},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			recorder := serve(newUIHandler(), cookieRequest(testCase.method, testCase.target, testCase.cookie))
 			if recorder.Code != http.StatusNotFound {
 				t.Fatalf("status %d, want 404", recorder.Code)
+			}
+			headers := recorder.Header()
+			if !strings.HasPrefix(headers.Get("Content-Type"), "text/html") {
+				t.Fatalf("content type %q, want text/html", headers.Get("Content-Type"))
+			}
+			if headers.Get("Content-Security-Policy") != contentSecurityPolicy ||
+				headers.Get("X-Content-Type-Options") != "nosniff" ||
+				headers.Get("Referrer-Policy") != "same-origin" {
+				t.Fatalf("missing security headers: %v", headers)
+			}
+			if testCase.method == http.MethodHead {
+				return
+			}
+			body := recorder.Body.String()
+			for _, want := range []string{`name="viewport"`, "Back to dashboard", `href="/"`} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("body missing %q", want)
+				}
+			}
+			for _, unwanted := range []string{"<script>", "style="} {
+				if strings.Contains(body, unwanted) {
+					t.Fatalf("body contains %q", unwanted)
+				}
+			}
+		})
+	}
+}
+
+func TestRequestsOutsideStyledNotFoundScopeAreUnchanged(t *testing.T) {
+	cases := map[string]struct {
+		method     string
+		target     string
+		wantStatus int
+	}{
+		"assets":          {http.MethodGet, "/assets/nope", http.StatusNotFound},
+		"v1":              {http.MethodGet, "/v1/nope", http.StatusNotFound},
+		"ui api":          {http.MethodGet, "/ui/api/nope", http.StatusNotFound},
+		"post unknown":    {http.MethodPost, "/nope", http.StatusNotFound},
+		"post known page": {http.MethodPost, "/requests", http.StatusMethodNotAllowed},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			recorder := serve(newUIHandler(), cookieRequest(testCase.method, testCase.target, ""))
+			if recorder.Code != testCase.wantStatus {
+				t.Fatalf("status %d, want %d", recorder.Code, testCase.wantStatus)
+			}
+			if strings.HasPrefix(recorder.Header().Get("Content-Type"), "text/html") ||
+				strings.Contains(recorder.Body.String(), "Back to dashboard") {
+				t.Fatalf("unexpected styled page: %q", recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestPathCleaningRedirectsAreNotStyledNotFound(t *testing.T) {
+	for _, target := range []string{"//requests", "/docs/../requests"} {
+		t.Run(target, func(t *testing.T) {
+			recorder := serve(newUIHandler(), cookieRequest(http.MethodGet, target, ""))
+			if recorder.Code != http.StatusTemporaryRedirect {
+				t.Fatalf("status %d, want 307", recorder.Code)
 			}
 		})
 	}

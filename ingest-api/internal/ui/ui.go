@@ -165,6 +165,18 @@ func WriteForbidden(responseWriter http.ResponseWriter, viewer Viewer) {
 	responseWriter.Write(rendered.Bytes())
 }
 
+func WriteNotFound(responseWriter http.ResponseWriter) {
+	var rendered bytes.Buffer
+	renderError := pageTemplates.ExecuteTemplate(&rendered, "not-found.html", pageData{AssetVersion: assetVersion, Page: "not-found"})
+	if renderError != nil {
+		http.Error(responseWriter, "404 page not found", http.StatusNotFound)
+		return
+	}
+	responseWriter.Header().Set("Content-Type", "text/html; charset=utf-8")
+	responseWriter.WriteHeader(http.StatusNotFound)
+	responseWriter.Write(rendered.Bytes())
+}
+
 func AssetHandler() http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, request *http.Request) {
 		relativePath, found := strings.CutPrefix(request.URL.Path, "/assets/"+assetVersion+"/")
